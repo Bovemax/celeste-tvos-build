@@ -24,7 +24,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: native-out
-          key: fna-native-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.version }}
+          key: fna-native-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.version }}
       - name: Build pinned public native sources
         if: steps.native-cache.outputs.cache-hit != 'true'
         shell: bash
@@ -51,6 +51,18 @@ jobs:
           }
           build "$src/SDL2/Xcode/SDL/SDL.xcodeproj" "Static Library-tvOS"
           build "$src/FNA3D/Xcode-iOS/FNA3D.xcodeproj" FNA3D "HEADER_SEARCH_PATHS=$src/SDL2/include $src/FNA3D/MojoShader $src/FNA3D/include"
+          # FAudio's packed distance curve contains a pointer relocation.
+          # Align this static instance without changing the public packed ABI.
+          python3 - "$src/FAudio/src/FACT3D.c" <<'PY'
+          import pathlib, sys
+          p = pathlib.Path(sys.argv[1])
+          s = p.read_text()
+          old = "static F3DAUDIO_DISTANCE_CURVE DefaultCurve ="
+          new = "static F3DAUDIO_DISTANCE_CURVE DefaultCurve __attribute__((aligned(8))) ="
+          assert s.count(old) == 1, "Pinned FAudio source changed"
+          p.write_text(s.replace(old, new))
+          PY
+          git -C "$src/FAudio" diff -- src/FACT3D.c
           build "$src/FAudio/Xcode-iOS/FAudio.xcodeproj" FAudio
           build "$src/Theorafile/Xcode-iOS/theorafile.xcodeproj" theorafile
           for name in SDL2 FNA3D FAudio theorafile; do
@@ -75,6 +87,7 @@ jobs:
           cp "$src/SDL2/LICENSE.txt" "$out/licenses/SDL2-LICENSE.txt"
           cp "$src/FNA3D/LICENSE" "$out/licenses/FNA3D-LICENSE.txt"
           cp "$src/FAudio/LICENSE" "$out/licenses/FAudio-LICENSE.txt"
+          git -C "$src/FAudio" diff -- src/FACT3D.c > "$out/FAudio-tvos-alignment.patch"
           cp -R "$src/Theorafile/licenses" "$out/licenses/Theorafile"
           # Preserve MojoShader and other vendored license notices.
           find "$src/FNA3D/MojoShader" -type f \( -iname 'license*' -o -iname 'copying*' \) -print0 | while IFS= read -r -d '' f; do
