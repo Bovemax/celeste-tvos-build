@@ -1,0 +1,39 @@
+name: FNA managed framework compatibility
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fna-managed.yml'
+permissions:
+  contents: read
+jobs:
+  fna:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Fetch pinned public FNA sources
+        shell: pwsh
+        run: |
+          git config --global url.https://github.com/.insteadOf git://github.com/
+          git clone https://github.com/FNA-XNA/FNA.git FNA
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C FNA checkout d52b4ce61e4086b785c51a96d331dbf106975a58
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C FNA submodule update --init --recursive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Compile managed FNA baseline
+        shell: pwsh
+        run: |
+          dotnet build FNA/FNA.Core.csproj -c Release -f netstandard2.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem FNA/bin -Recurse -Filter FNA.dll
+          if (-not (Get-ChildItem FNA/bin -Recurse -Filter FNA.dll)) { throw "FNA.dll missing" }
+      - name: Record dependency and licensing metadata
+        shell: pwsh
+        run: |
+          git -C FNA rev-parse HEAD
+          git -C FNA submodule status --recursive
+          Get-ChildItem FNA -File | Where-Object { $_.Name -match 'LICENSE|COPYING' } | Select-Object Name
