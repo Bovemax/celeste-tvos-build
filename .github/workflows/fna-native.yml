@@ -24,7 +24,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: native-out
-          key: fna-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.version }}
+          key: fna-native-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.version }}
       - name: Build pinned public native sources
         if: steps.native-cache.outputs.cache-hit != 'true'
         shell: bash
@@ -59,9 +59,14 @@ jobs:
           done
           # The pinned FNA3D Xcode project enables its Metal renderer. No
           # MoltenVK, unlicensed third-party stubs, FMOD, or private inputs.
+          # The host owns the application entry point; retain SDL_UIKitRunApp.
+          xcrun ar -d "$builds/libSDL2.a" SDL_uikit_main.o
+          if xcrun ar -t "$builds/libSDL2.a" | grep -Fx SDL_uikit_main.o; then
+            exit 1
+          fi
           sdk=$(xcrun --sdk appletvos --show-sdk-path)
           frameworks=()
-          for name in Foundation UIKit AudioToolbox AVFoundation CoreGraphics Metal QuartzCore GameController CoreBluetooth IOSurface CoreFoundation CoreMedia CoreAudio OpenGLES Security SystemConfiguration CFNetwork; do
+          for name in Foundation UIKit AudioToolbox AVFoundation CoreGraphics Metal QuartzCore GameController CoreHaptics CoreBluetooth IOSurface CoreFoundation CoreMedia CoreAudio OpenGLES Security SystemConfiguration CFNetwork; do
             if [[ -d "$sdk/System/Library/Frameworks/$name.framework" ]]; then
               frameworks+=(-framework "$name")
             fi
