@@ -24,7 +24,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: native-out
-          key: fna-native-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.version }}
+          key: fna-native-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.version }}
+      - name: Restore compiled public static archives
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        id: archive-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: native-build/*.a
+          key: fna-static-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.version }}
       - name: Build pinned public native sources
         if: steps.native-cache.outputs.cache-hit != 'true'
         shell: bash
@@ -47,28 +54,52 @@ jobs:
           clone_at FNA-XNA/Theorafile Theorafile 0c5504658a3108919e53b625287786a87529de42
           build() {
             local project="$1" target="$2"; shift 2
+            if [[ "${{ steps.archive-cache.outputs.cache-hit }}" == true ]]; then
+              echo "Reusing compiled archive for $target"
+              return
+            fi
             xcodebuild -project "$project" -target "$target" -configuration Release -sdk appletvos ARCHS=arm64 ONLY_ACTIVE_ARCH=NO TVOS_DEPLOYMENT_TARGET=15.0 CODE_SIGNING_ALLOWED=NO CONFIGURATION_BUILD_DIR="$builds" "$@"
           }
           build "$src/SDL2/Xcode/SDL/SDL.xcodeproj" "Static Library-tvOS"
           build "$src/FNA3D/Xcode-iOS/FNA3D.xcodeproj" FNA3D "HEADER_SEARCH_PATHS=$src/SDL2/include $src/FNA3D/MojoShader $src/FNA3D/include"
           # FAudio's packed distance curve contains a pointer relocation.
-          # Align this static instance without changing the public packed ABI.
-          python3 - "$src/FAudio/src/FACT3D.c" <<'PY'
-          import pathlib, sys
-          p = pathlib.Path(sys.argv[1])
-          s = p.read_text()
-          old = "static F3DAUDIO_DISTANCE_CURVE DefaultCurve ="
-          new = "static F3DAUDIO_DISTANCE_CURVE DefaultCurve __attribute__((aligned(8))) ="
-          assert s.count(old) == 1, "Pinned FAudio source changed"
-          p.write_text(s.replace(old, new))
+          # Align every static distance curve in these files, preserving the packed ABI.
+          python3 - "$src/FAudio/src" <<'PY'
+          import pathlib, re, sys
+          root = pathlib.Path(sys.argv[1])
+          for name, expected in (("FACT3D.c", 1), ("F3DAudio.c", 2)):
+              p = root / name
+              s, count = re.subn(
+                  r"(static F3DAUDIO_DISTANCE_CURVE (?:DefaultCurve|DefaultVolumeCurve|name##Default)) =",
+                  r"\1 __attribute__((aligned(8))) =",
+                  p.read_text(),
+              )
+              assert count == expected, f"Pinned {name} changed: {count}"
+              p.write_text(s)
           PY
-          git -C "$src/FAudio" diff -- src/FACT3D.c
+          git -C "$src/FAudio" diff -- src/FACT3D.c src/F3DAudio.c
           build "$src/FAudio/Xcode-iOS/FAudio.xcodeproj" FAudio
           build "$src/Theorafile/Xcode-iOS/theorafile.xcodeproj" theorafile
           for name in SDL2 FNA3D FAudio theorafile; do
             test -s "$builds/lib$name.a"
             xcrun lipo "$builds/lib$name.a" -verify_arch arm64
           done
+      # Save independently of the later link so linker retries reuse compiled libraries.
+      # Bump fna-static-v1 when source pins, patches or compilation flags change.
+      - name: Save compiled public static archives
+        if: steps.native-cache.outputs.cache-hit != 'true' && steps.archive-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: native-build/*.a
+          key: ${{ steps.archive-cache.outputs.cache-primary-key }}
+      - name: Link native framework and collect licenses
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$PWD/native-src"
+          out="$PWD/native-out"
+          builds="$PWD/native-build"
           # The pinned FNA3D Xcode project enables its Metal renderer. No
           # MoltenVK, unlicensed third-party stubs, FMOD, or private inputs.
           # The host owns the application entry point; retain SDL_UIKitRunApp.
@@ -83,11 +114,11 @@ jobs:
               frameworks+=(-framework "$name")
             fi
           done
-          xcrun --sdk appletvos clang++ -arch arm64 -mtvos-version-min=15.0 -isysroot "$sdk" -dynamiclib -Wl,-install_name,@rpath/CelesteNative.framework/CelesteNative -Wl,-undefined,error -Wl,-force_load,"$builds/libSDL2.a" -Wl,-force_load,"$builds/libFNA3D.a" -Wl,-force_load,"$builds/libFAudio.a" -Wl,-force_load,"$builds/libtheorafile.a" "${frameworks[@]}" -lz -liconv -o "$out/CelesteNative.dylib"
+          xcrun --sdk appletvos clang++ -arch arm64 -mtvos-version-min=15.0 -isysroot "$sdk" -dynamiclib -Wl,-install_name,@rpath/CelesteNative.framework/CelesteNative -Wl,-force_load,"$builds/libSDL2.a" -Wl,-force_load,"$builds/libFNA3D.a" -Wl,-force_load,"$builds/libFAudio.a" -Wl,-force_load,"$builds/libtheorafile.a" "${frameworks[@]}" -lz -liconv -o "$out/CelesteNative.dylib"
           cp "$src/SDL2/LICENSE.txt" "$out/licenses/SDL2-LICENSE.txt"
           cp "$src/FNA3D/LICENSE" "$out/licenses/FNA3D-LICENSE.txt"
           cp "$src/FAudio/LICENSE" "$out/licenses/FAudio-LICENSE.txt"
-          git -C "$src/FAudio" diff -- src/FACT3D.c > "$out/FAudio-tvos-alignment.patch"
+          git -C "$src/FAudio" diff -- src/FACT3D.c src/F3DAudio.c > "$out/FAudio-tvos-alignment.patch"
           cp -R "$src/Theorafile/licenses" "$out/licenses/Theorafile"
           # Preserve MojoShader and other vendored license notices.
           find "$src/FNA3D/MojoShader" -type f \( -iname 'license*' -o -iname 'copying*' \) -print0 | while IFS= read -r -d '' f; do
