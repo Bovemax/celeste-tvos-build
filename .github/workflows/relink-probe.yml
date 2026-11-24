@@ -6,35 +6,17 @@ on:
       - '.github/workflows/relink-probe.yml'
 permissions:
   contents: read
+  actions: read
 jobs:
-  prepare:
-    runs-on: macos-26
-    timeout-minutes: 15
-    steps:
-      - name: Prepare original ARM64 tvOS object fixtures
-        run: |
-          set -eu
-          mkdir probe
-          printf 'int supplied(void); int main(void) { return supplied(); }\n' > probe/main.c
-          printf 'int supplied(void) { return 0; }\n' > probe/local.c
-          xcrun --sdk appletvos clang -arch arm64 -mtvos-version-min=15.0 -c probe/main.c -o probe/main.o
-          xcrun --sdk appletvos clang -arch arm64 -mtvos-version-min=15.0 -c probe/local.c -o probe/local.o
-          xcrun ar rcs probe/liblocal.a probe/local.o
-          # Only original object fixtures leave this runner; no Apple SDK files.
-      - uses: actions/upload-artifact@v4
-        with:
-          name: relink-fixtures
-          path: |
-            probe/main.o
-            probe/liblocal.a
   windows:
-    needs: prepare
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: relink-fixtures
+          run-id: 45446949250
+          github-token: ${{ github.token }}
           path: probe
       - name: Locate LLVM Mach-O linker
         shell: pwsh
