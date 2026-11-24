@@ -7,13 +7,36 @@ on:
       - '.github/workflows/windows-packager.yml'
 permissions:
   contents: read
+  actions: read
 jobs:
   packaging:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python -m unittest discover -s tools -v
+      - name: Download existing interpreter host without rebuilding
+        uses: actions/download-artifact@v4
+        with:
+          name: interpreter-smoke-unsigned
+          run-id: 45430381469
+          github-token: ${{ github.token }}
+          path: smoke-inputs
+      - name: Package actual host on Windows
+        shell: pwsh
+        run: |
+          $hostFile = @(Get-ChildItem smoke-inputs -Recurse -File -Filter Host-only.ipa)
+          $dll = @(Get-ChildItem smoke-inputs -Recurse -File -Filter Payload.dll)
+          if ($hostFile.Count -ne 1 -or $dll.Count -ne 1) { throw "Expected one host and one payload" }
+          python tools/inject_payload.py $hostFile[0].FullName $dll[0].FullName Windows-test.ipa
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m zipfile -t Windows-test.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-packaged-interpreter-test
+          path: Windows-test.ipa
+          if-no-files-found: error
+          retention-days: 7
