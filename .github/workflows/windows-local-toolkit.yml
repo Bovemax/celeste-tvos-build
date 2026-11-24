@@ -1,6 +1,9 @@
 name: Windows local Celeste toolkit
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["FNA game host"]
+    types: [completed]
   push:
     paths:
       - 'tools/*.py'
@@ -13,11 +16,13 @@ concurrency:
   cancel-in-progress: true
 jobs:
   toolkit:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -39,11 +44,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & toolkit/CelestePackage.exe --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Find latest successful host
+        id: host
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $runs = gh run list --repo "$env:GITHUB_REPOSITORY" --workflow game-host.yml --branch main --status success --limit 1 --json databaseId | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $runs) { throw "No successful host run" }
+          "run=$($runs[0].databaseId)" >> $env:GITHUB_OUTPUT
       - name: Reuse validated public interpreter host
         uses: actions/download-artifact@v4
         with:
           name: fna-game-host-base-unsigned
-          run-id: 45479985843
+          run-id: ${{ steps.host.outputs.run }}
           github-token: ${{ github.token }}
           path: toolkit/host
       - name: Reuse validated public native framework
@@ -56,13 +70,15 @@ jobs:
       - name: Exercise packaged executable against real host and native framework
         shell: pwsh
         run: |
-          & toolkit/CelestePackage.exe toolkit/host/GameHost-base.ipa Windows-toolkit-probe.ipa --native toolkit/native/CelesteNative.dylib --probe
+          $extra = @()
+          if (Test-Path toolkit/host/ExternalProbe.dll) { $extra = @("--probe-assembly", "toolkit/host/ExternalProbe.dll") }
+          & toolkit/CelestePackage.exe toolkit/host/GameHost-base.ipa Windows-toolkit-probe.ipa --native toolkit/native/CelesteNative.dylib --probe @extra
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m zipfile -t Windows-toolkit-probe.ipa
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Move-Item Windows-toolkit-probe.ipa toolkit/FNA-probe.ipa
           Copy-Item README.md toolkit/README.md
-          "Host run: 45479985843" | Set-Content toolkit/build-inputs.txt
+          "Host run: ${{ steps.host.outputs.run }}" | Set-Content toolkit/build-inputs.txt
           "Native run: 45489402010" | Add-Content toolkit/build-inputs.txt
           Get-ChildItem toolkit -Filter *.exe | Get-FileHash -Algorithm SHA256 | Format-Table -AutoSize | Out-String -Width 240 | Set-Content toolkit/executable-sha256.txt
       - uses: actions/upload-artifact@v4

@@ -57,7 +57,12 @@ jobs:
           path: native
       - name: Assemble unsigned FNA test app
         if: steps.inputs.outputs.ready == 'true'
-        run: python tools/package_game.py host/GameHost-base.ipa FNA-probe.ipa --native native/CelesteNative.dylib --probe
+        shell: pwsh
+        run: |
+          $extra = @()
+          if (Test-Path host/ExternalProbe.dll) { $extra = @("--probe-assembly", "host/ExternalProbe.dll") }
+          python tools/package_game.py host/GameHost-base.ipa FNA-probe.ipa --native native/CelesteNative.dylib --probe @extra
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Record component provenance
         if: steps.inputs.outputs.ready == 'true'
         shell: pwsh

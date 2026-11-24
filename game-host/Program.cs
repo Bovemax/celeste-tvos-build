@@ -120,6 +120,8 @@ internal static class Program
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void RunProbe()
     {
+        AssemblyLoadContext.Default.Resolving += (context, name) =>
+            name.Name == "FNA" ? typeof(Game).Assembly : null;
         using var game = new FnaProbe();
         game.Run();
     }
@@ -141,17 +143,24 @@ internal static class Program
             NativeLibrary.SetDllImportResolver(a, Resolve);
             return a;
         };
-        var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(Payload, "Celeste.dll"));
+        InvokePayload("Celeste.dll", true);
+    }
+
+    internal static object? InvokePayload(string file, bool game = false)
+    {
+        var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(Payload, file));
         NativeLibrary.SetDllImportResolver(assembly, Resolve);
-        var entry = assembly.EntryPoint ?? assembly.GetType("Celeste.Celeste", true)!
-            .GetMethod("Main", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        var entry = assembly.EntryPoint;
+        if (entry == null && game)
+            entry = assembly.GetType("Celeste.Celeste", true)!
+                .GetMethod("Main", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
         if (entry == null || !entry.IsStatic)
             throw new MissingMethodException("No static game entry point");
         var parameters = entry.GetParameters();
         if (parameters.Length == 0)
-            entry.Invoke(null, null);
+            return entry.Invoke(null, null);
         else if (parameters.Length == 1 && parameters[0].ParameterType == typeof(string[]))
-            entry.Invoke(null, new object[] { Array.Empty<string>() });
+            return entry.Invoke(null, new object[] { Array.Empty<string>() });
         else
             throw new NotSupportedException("Unexpected game entry point signature");
     }

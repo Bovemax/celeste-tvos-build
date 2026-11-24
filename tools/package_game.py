@@ -4,6 +4,7 @@ All inputs remain local. Output is unsigned; packaging is not runtime validation
 """
 import argparse
 import pathlib
+import re
 import plistlib
 import shutil
 import tempfile
@@ -22,7 +23,7 @@ def framework_info(name):
         "MinimumOSVersion": "15.0", "UIDeviceFamily": [3],
     })
 
-def package(host, managed, content, output, native, fmod=None, probe=False):
+def package(host, managed, content, output, native, fmod=None, probe=False, probe_assembly=None, fmod_version=None):
     host, output, native = (p.resolve() for p in (host, output, native))
     inputs = [host, native]
     if output.exists():
@@ -34,6 +35,20 @@ def package(host, managed, content, output, native, fmod=None, probe=False):
         if output.is_relative_to(content) or output.is_relative_to(managed):
             raise ValueError("Output must be outside input directories")
         inputs += [managed, content, fmod]
+    if probe_assembly is not None:
+        if not probe:
+            raise ValueError("Diagnostic assembly requires --probe")
+        probe_assembly = probe_assembly.resolve()
+        inputs.append(probe_assembly)
+        with probe_assembly.open("rb") as f:
+            if f.read(2) != b"MZ":
+                raise ValueError("Invalid diagnostic PE assembly")
+    if fmod is not None:
+        inputs.append(fmod.resolve())
+    if fmod_version is not None:
+        if not probe or fmod is None or not re.fullmatch(r"(?:0x)?[0-9A-Fa-f]{1,8}", fmod_version):
+            raise ValueError("FMOD version requires probe mode, FMOD library and hexadecimal header version")
+        fmod_version = fmod_version.removeprefix("0x")
     if output in inputs:
         raise ValueError("Output cannot overwrite an input")
     frameworks = {"CelesteNative": native}
@@ -92,6 +107,10 @@ def package(host, managed, content, output, native, fmod=None, probe=False):
                     dest.write(path, root + name)
                 if probe:
                     dest.writestr(root + "GameAssemblies/Content/probe.txt", "Original FNA content probe")
+                    if probe_assembly is not None:
+                        dest.write(probe_assembly, root + "GameAssemblies/ExternalProbe.dll")
+                    if fmod_version is not None:
+                        dest.writestr(root + "GameAssemblies/fmod-version.txt", fmod_version)
                 for name, lib in frameworks.items():
                     prefix = root + "Frameworks/" + name + ".framework/"
                     info = zipfile.ZipInfo(prefix + name)
@@ -116,8 +135,10 @@ if __name__ == "__main__":
     p.add_argument("--managed", type=pathlib.Path)
     p.add_argument("--content", type=pathlib.Path)
     p.add_argument("--probe", action="store_true")
+    p.add_argument("--probe-assembly", type=pathlib.Path)
+    p.add_argument("--fmod-version", help="Hex FMOD_VERSION from matching local header; optional probe initialization")
     a = p.parse_args()
     try:
-        print("Created unsigned local package:", package(a.host, a.managed, a.content, a.output, a.native, a.fmod, a.probe))
+        print("Created unsigned local package:", package(a.host, a.managed, a.content, a.output, a.native, a.fmod, a.probe, a.probe_assembly, a.fmod_version))
     except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
         p.exit(1, f"Packaging failed: {exc}\n")

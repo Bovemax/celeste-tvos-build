@@ -66,6 +66,17 @@ class GamePackageTests(unittest.TestCase):
             self.assertIn(self.prefix + "GameAssemblies/Content/probe.txt", z.namelist())
             self.assertNotIn(self.prefix + "GameAssemblies/Celeste.dll", z.namelist())
 
+    def test_external_probe_with_optional_fmod(self):
+        self.make_host()
+        assembly = self.root / "ExternalProbe.dll"
+        assembly.write_bytes(b"MZexternal")
+        package(self.host, None, None, self.output, self.native, self.fmod,
+                probe=True, probe_assembly=assembly, fmod_version="0x00020200")
+        with zipfile.ZipFile(self.output) as z:
+            self.assertEqual(z.read(self.prefix + "GameAssemblies/ExternalProbe.dll"), b"MZexternal")
+            self.assertEqual(z.read(self.prefix + "GameAssemblies/fmod-version.txt"), b"00020200")
+            self.assertNotIn(self.prefix + "GameAssemblies/Celeste.dll", z.namelist())
+
     def test_invalid_host_and_platform(self):
         self.make_host(1)
         with self.assertRaises(ValueError):

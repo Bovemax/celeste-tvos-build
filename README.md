@@ -27,8 +27,25 @@ Sign the probe with a tool that supports tvOS and recursively signs nested
 frameworks, then install it on your Apple TV. A blue screen indicates FNA
 graphics started. Connect a controller: green should indicate connection;
 holding A should make the screen gold and pressing A should play a short tone.
-This exercises SDL/GameController, Metal/FNA3D and FAudio, not FMOD or Celeste.
-Report the screen, controller, tone, any signing error and any crash log.
+This exercises SDL/GameController, Metal/FNA3D and FAudio, not Celeste.
+Use the newest toolkit that includes host/ExternalProbe.dll. Its diagnostic
+probe has seven colored bars (top to bottom): external entry invocation,
+FNA math, external SDL call, bundled content read, cache write/read,
+FMOD, and FAudio. Green = passed; red = failed; gray = not included;
+gold = partial (FMOD exports only or FAudio ready before pressing A).
+Background blue/green/gold still shows controller state. Photograph the
+screen before and after pressing A and report whether you heard a tone.
+
+Optional local FMOD initialization test, using your own matching framework
+and exact FMOD_VERSION macro from its header (example only, replace version):
+
+```powershell
+.\CelestePackage.exe .\host\GameHost-base.ipa .\FNA-FMOD-probe.ipa --native .\native\CelesteNative.dylib --probe --probe-assembly .\host\ExternalProbe.dll --fmod "C:\LocalCeleste\FMODLocal.dylib" --fmod-version 0x00020200
+```
+
+Without --fmod-version the test only loads the library and checks exports.
+It does not load game banks or prove audible FMOD playback. Keep the locally
+assembled FMOD probe private. The app bundle identifier remains unchanged.
 
 ## Prepare local inputs
 
