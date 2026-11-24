@@ -11,6 +11,7 @@ Open [Windows local Celeste toolkit](https://github.com/Bovemax/celeste-tvos-bui
 and download the `celeste-windows-local-toolkit` artifact from a successful run.
 Extract the ZIP into a new folder on Windows. It contains:
 
+- `CelestePrepareInputs.exe`: generate a private input ZIP and SHA256 manifest from local folders.
 - `CelesteLocalBuild.exe`: local validation, patching, optional FMOD linking and IPA packaging.
 - `CelestePackage.exe`: package already-patched assemblies without decompilation.
 - `host/GameHost-base.ipa` and `native/CelesteNative.dylib`: public prebuilt components.
@@ -53,6 +54,17 @@ local patches were authored against.
 
 Python is not required when using the packaged Windows executables; it is
 required to run the source scripts directly.
+
+If you do not already have the input ZIP, the new input-preparation tool creates it from local folders (no uploads):
+
+```powershell
+.\CelestePrepareInputs.exe "C:\LocalCeleste\managed" "C:\LocalCeleste\native" "C:\LocalCeleste\Content" "C:\LocalCeleste\tvos-build-inputs.zip"
+```
+
+The managed folder must contain the listed managed files and the native folder
+must contain the two compatible tvOS FMOD archives. Content is validated but
+not duplicated inside the ZIP. This checks hashes and basic file formats, not
+runtime compatibility.
 
 ## Build on Windows
 

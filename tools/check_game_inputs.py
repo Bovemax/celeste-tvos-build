@@ -17,6 +17,8 @@ def check(archive, content):
         if len(names) != len(set(names)):
             errors.append("Duplicate archive entries")
         manifest = json.loads(z.read("manifest.json"))
+        if "managed/Steamworks.NET.dll" in names:
+            required.append("managed/Steamworks.NET.dll")
         for name in required:
             if name not in names:
                 errors.append("Missing: " + name)

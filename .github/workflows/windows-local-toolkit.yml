@@ -31,6 +31,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m PyInstaller --clean --noconfirm --onefile --name CelestePackage --distpath toolkit tools/package_game.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m PyInstaller --clean --noconfirm --onefile --name CelestePrepareInputs --distpath toolkit tools/create_input_pack.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & toolkit/CelestePrepareInputs.exe --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & toolkit/CelesteLocalBuild.exe --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & toolkit/CelestePackage.exe --help
