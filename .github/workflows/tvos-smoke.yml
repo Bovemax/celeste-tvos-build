@@ -1,0 +1,37 @@
+name: tvOS SDK smoke test
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/tvos-smoke.yml'
+permissions:
+  contents: read
+jobs:
+  sdk:
+    runs-on: macos-15-arm64
+    timeout-minutes: 10
+    steps:
+      - name: Inspect SDK
+        run: |
+          xcodebuild -version
+          xcrun --sdk appletvos --show-sdk-path
+          xcrun --sdk appletvos --show-sdk-version
+      - name: Compile and link an unsigned ARM64 executable
+        run: |
+          cat > /tmp/smoke.m <<'EOF'
+          #import <Foundation/Foundation.h>
+          #import <UIKit/UIKit.h>
+          #import <GameController/GameController.h>
+          #import <AVFoundation/AVFoundation.h>
+          int main(int argc, char **argv) {
+            @autoreleasepool {
+              NSLog(@"Controllers: %@", [GCController controllers]);
+              NSLog(@"Audio session: %@", [AVAudioSession sharedInstance]);
+              return UIApplicationMain(argc, argv, nil, nil);
+            }
+          }
+          EOF
+          xcrun --sdk appletvos clang -arch arm64 -mtvos-version-min=15.0 -fobjc-arc /tmp/smoke.m -framework Foundation -framework UIKit -framework GameController -framework AVFoundation -o /tmp/tvos-smoke
+          file /tmp/tvos-smoke
+          xcrun vtool -show-build /tmp/tvos-smoke
+          otool -L /tmp/tvos-smoke
