@@ -1,0 +1,79 @@
+name: Assemble FNA device probe on Windows
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["FNA game host", "Public FNA native framework"]
+    types: [completed]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: fna-probe-package
+  cancel-in-progress: false
+jobs:
+  package:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Find successful public component builds
+        id: inputs
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $hostRuns = gh run list --repo "$env:GITHUB_REPOSITORY" --workflow game-host.yml --branch main --status success --limit 1 --json databaseId | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $nativeRuns = gh run list --repo "$env:GITHUB_REPOSITORY" --workflow fna-native.yml --branch main --status success --limit 1 --json databaseId | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not $hostRuns -or -not $nativeRuns) {
+            Write-Host "Waiting for both component builds; nothing to package yet."
+            "ready=false" >> $env:GITHUB_OUTPUT
+          } else {
+            "ready=true" >> $env:GITHUB_OUTPUT
+            "host=$($hostRuns[0].databaseId)" >> $env:GITHUB_OUTPUT
+            "native=$($nativeRuns[0].databaseId)" >> $env:GITHUB_OUTPUT
+          }
+      - if: steps.inputs.outputs.ready == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: fna-game-host-base-unsigned
+          run-id: ${{ steps.inputs.outputs.host }}
+          github-token: ${{ github.token }}
+          path: host
+      - if: steps.inputs.outputs.ready == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: public-fna-native-arm64
+          run-id: ${{ steps.inputs.outputs.native }}
+          github-token: ${{ github.token }}
+          path: native
+      - name: Assemble unsigned FNA test app
+        if: steps.inputs.outputs.ready == 'true'
+        run: python tools/package_game.py host/GameHost-base.ipa FNA-probe.ipa --native native/CelesteNative.dylib --probe
+      - name: Record component provenance
+        if: steps.inputs.outputs.ready == 'true'
+        shell: pwsh
+        run: |
+          "Host run: ${{ steps.inputs.outputs.host }}" | Set-Content build-inputs.txt
+          "Native run: ${{ steps.inputs.outputs.native }}" | Add-Content build-inputs.txt
+          python -m zipfile -t FNA-probe.ipa
+      - if: steps.inputs.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fna-device-probe-unsigned
+          path: |
+            FNA-probe.ipa
+            build-inputs.txt
+            host/FNA-LICENSE.txt
+            native/licenses/
+            native/source-revisions.txt
+          if-no-files-found: error
+          retention-days: 30
