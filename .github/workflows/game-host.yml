@@ -1,0 +1,58 @@
+name: FNA game host
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'game-host/**'
+      - '.github/workflows/game-host.yml'
+permissions:
+  contents: read
+concurrency:
+  group: fna-game-host
+  cancel-in-progress: true
+jobs:
+  host:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build pinned public managed FNA
+        run: |
+          set -euo pipefail
+          git config --global url.https://github.com/.insteadOf git://github.com/
+          git clone https://github.com/FNA-XNA/FNA.git upstream-fna
+          git -C upstream-fna checkout d52b4ce61e4086b785c51a96d331dbf106975a58
+          git -C upstream-fna submodule update --init --recursive
+          dotnet build upstream-fna/FNA.Core.csproj -c Release -f netstandard2.0
+          mkdir -p deps
+          dll=$(find upstream-fna/bin -name FNA.dll -type f -print -quit)
+          test -n "$dll"
+          cp "$dll" deps/FNA.dll
+      - name: Install tvOS workload
+        run: dotnet workload install tvos
+      - name: Publish unsigned interpreter host
+        run: |
+          set -euo pipefail
+          dotnet publish game-host/GameHost.csproj -c Release -r tvos-arm64 -p:EnableCodeSigning=false -p:ValidateXcodeVersion=false -p:BuildIpa=false
+          APP=$(find game-host/bin -name '*.app' -type d -print -quit)
+          test -n "$APP"
+          /usr/libexec/PlistBuddy -c 'Print :CelesteLocalPayloadVersion' "$APP/Info.plist" | grep -x 2
+          mkdir -p out/Payload
+          ditto "$APP" out/Payload/GameHost.app
+          mkdir -p out/Payload/GameHost.app/GameAssemblies/Content
+          # No game files, FMOD, or native dependency binaries are supplied here.
+          ditto -c -k --keepParent out/Payload out/GameHost-base.ipa
+          unzip -t out/GameHost-base.ipa | tail -1
+          xcrun vtool -show-build out/Payload/GameHost.app/GameHost
+          cp upstream-fna/LICENSE out/FNA-LICENSE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fna-game-host-base-unsigned
+          path: |
+            out/GameHost-base.ipa
+            out/FNA-LICENSE.txt
+          if-no-files-found: error
+          retention-days: 30
