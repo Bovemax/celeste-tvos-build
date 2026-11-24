@@ -10,6 +10,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
+from toolchain import environment, find
 
 def verify_tvos_dylib(path, expected_install_name=None):
     with path.open("rb") as stream:
@@ -59,9 +60,14 @@ def link(archives, output, sdk=None, frameworks=(), libraries=(), objects=(), fr
     if not re.fullmatch(r"\d+(\.\d+){1,2}", sdk_version):
         raise ValueError("Invalid SDK version")
     install_name = "@rpath/" + (framework_name + ".framework/" + framework_name if framework_name else output.name)
-    linker = shutil.which("ld64.lld")
-    if not linker:
-        raise ValueError("Install LLVM with ld64.lld available on PATH")
+    linker = find("ld64.lld")
+    driver = [linker] if linker else []
+    if not driver:
+        linker = find("lld")
+        if linker:
+            driver = [linker, "-flavor", "darwin"]
+    if not driver:
+        raise ValueError("Missing LLVM Mach-O linker. Run Setup-Toolchain.ps1 beside the toolkit first.")
     if not archives:
         raise ValueError("At least one static archive is required")
     for item in archives:
@@ -75,7 +81,7 @@ def link(archives, output, sdk=None, frameworks=(), libraries=(), objects=(), fr
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output.parent) as tmp:
         target = pathlib.Path(tmp) / output.name
-        args = [linker, "-arch", "arm64", "-platform_version", "tvos", "15.0", sdk_version,
+        args = driver + ["-arch", "arm64", "-platform_version", "tvos", "15.0", sdk_version,
                 "-dylib", "-install_name", install_name,
                 "-undefined", "error", "-o", str(target)]
         if sdk:
@@ -87,7 +93,7 @@ def link(archives, output, sdk=None, frameworks=(), libraries=(), objects=(), fr
             args += ["-framework", name]
         for name in libraries:
             args += ["-l" + name]
-        subprocess.run(args, check=True)
+        subprocess.run(args, check=True, env=environment())
         verify_tvos_dylib(target, install_name)
         with output.open("xb") as dest, target.open("rb") as src:
             shutil.copyfileobj(src, dest)

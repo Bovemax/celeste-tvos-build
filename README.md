@@ -62,12 +62,27 @@ local patches were authored against.
 - The original game `Content` folder.
 - Your matching local patches directory containing `crash-fixes.patch` and,
   if applicable, `remove-steam.patch` and `remove-steam2.patch`.
-- Git, a .NET SDK compatible with the patched project, and
-  `ilspycmd` 8.0.0.7246-preview3 available on PATH.
+- The portable toolchain below, or compatible Git, .NET SDK and ILSpy on PATH.
 - Either your own already-linked tvOS ARM64 FMOD dynamic library with install
   name `@rpath/FMODLocal.framework/FMODLocal`, or local compatible FMOD static
   archives plus LLVM (`ld64.lld` on PATH) and a lawfully available tvOS SDK
   linker root. Desktop/iOS FMOD binaries cannot be substituted.
+
+## Portable Windows compiler dependencies
+
+Run the included setup script once from the extracted toolkit folder:
+
+```powershell
+powershell -NoProfile -File .\\Setup-Toolchain.ps1
+```
+
+It downloads exact official versions into `toolchain/`: .NET SDK 8.0.419,
+ILSpy 8.0.0.7246-preview3, MinGit 2.51.2 and LLVM 20.1.8. It checks upstream
+archive hashes, runs version checks, and does not change the system PATH.
+Use `-SkipLLVM` if you already have a compatible FMOD framework. LLVM is a
+large download. The compiler and linker prefer this local directory over PATH.
+These are downloaded locally rather than republished inside the public ZIP.
+Setup does not provide FMOD, Apple SDK files, or game files.
 
 Python is not required when using the packaged Windows executables; it is
 required to run the source scripts directly.

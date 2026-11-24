@@ -9,9 +9,12 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from toolchain import environment, find
 
 def run(args, cwd=None):
-    env = dict(os.environ, DOTNET_ROLL_FORWARD="Major")
+    env = environment()
+    args = list(args)
+    args[0] = find(str(args[0])) or str(args[0])
     subprocess.run([str(a) for a in args], cwd=cwd, env=env, check=True)
 
 def build(staged, patches, output):
@@ -19,8 +22,8 @@ def build(staged, patches, output):
     if output.exists():
         raise ValueError("Choose a new output directory")
     for tool in ("git", "dotnet", "ilspycmd"):
-        if not shutil.which(tool):
-            raise ValueError("Missing tool on PATH: " + tool)
+        if not find(tool):
+            raise ValueError("Missing tool: " + tool + ". Run Setup-Toolchain.ps1 beside the toolkit first.")
     game = staged / "managed"
     for name in ("Celeste.exe", "FNA.dll", "System.Core.dll", "System.Xml.dll",
                  "mscorlib.dll", "Celeste.Content.dll"):
