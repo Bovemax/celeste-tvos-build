@@ -84,6 +84,15 @@ large download. The compiler and linker prefer this local directory over PATH.
 These are downloaded locally rather than republished inside the public ZIP.
 Setup does not provide FMOD, Apple SDK files, or game files.
 
+The packaged executables use only their portable toolchain, not system PATH.
+Keep the accompanying `_runtime-*` directories next to their executables.
+The toolchain contains its own NuGet package/HTTP caches, .NET CLI home,
+temporary directory and Git config; setup changes only its process environment.
+Choose a new work directory and output IPA inside the toolkit for a fully
+local build. To remove the toolkit, close its tools, copy your IPA elsewhere,
+then delete the extracted toolkit folder. Windows itself may still retain
+normal OS/security logs. No permanent installation is intended.
+
 Python is not required when using the packaged Windows executables; it is
 required to run the source scripts directly.
 

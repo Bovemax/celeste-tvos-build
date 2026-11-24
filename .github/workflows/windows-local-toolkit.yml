@@ -7,6 +7,7 @@ on:
   push:
     paths:
       - 'tools/*.py'
+      - 'tools/*.ps1'
       - '.github/workflows/windows-local-toolkit.yml'
 permissions:
   contents: read
@@ -38,12 +39,29 @@ jobs:
       - name: Freeze local tools into Windows executables
         shell: pwsh
         run: |
-          python -m PyInstaller --clean --noconfirm --onefile --name CelesteLocalBuild --distpath toolkit tools/build_local.py
+          python -m PyInstaller --clean --noconfirm --onedir --contents-directory _runtime-CelesteLocalBuild --name CelesteLocalBuild --distpath frozen tools/build_local.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m PyInstaller --clean --noconfirm --onefile --name CelestePackage --distpath toolkit tools/package_game.py
+          python -m PyInstaller --clean --noconfirm --onedir --contents-directory _runtime-CelestePackage --name CelestePackage --distpath frozen tools/package_game.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m PyInstaller --clean --noconfirm --onefile --name CelestePrepareInputs --distpath toolkit tools/create_input_pack.py
+          python -m PyInstaller --clean --noconfirm --onedir --contents-directory _runtime-CelestePrepareInputs --name CelestePrepareInputs --distpath frozen tools/create_input_pack.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force toolkit | Out-Null
+          foreach ($name in @("CelesteLocalBuild", "CelestePackage", "CelestePrepareInputs")) {
+            Move-Item "frozen/$name/$name.exe" toolkit
+            Move-Item "frozen/$name/_runtime-$name" toolkit
+          }
+          # Exercise the executables from a relocated path containing spaces,
+          # with a different working directory, before distributing them.
+          $relocated = Join-Path $PWD "Portable toolkit with spaces"
+          Move-Item toolkit $relocated
+          Push-Location $env:RUNNER_TEMP
+          try {
+            foreach ($name in @("CelesteLocalBuild", "CelestePackage", "CelestePrepareInputs")) {
+              & (Join-Path $relocated "$name.exe") --help
+              if ($LASTEXITCODE -ne 0) { throw "$name failed from relocated directory" }
+            }
+          } finally { Pop-Location }
+          Move-Item $relocated toolkit
           & toolkit/CelestePrepareInputs.exe --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & toolkit/CelesteLocalBuild.exe --help

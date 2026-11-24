@@ -2,7 +2,11 @@
 [CmdletBinding()]
 param([switch]$SkipLLVM)
 $ErrorActionPreference = 'Stop'
-$root = Join-Path $PSScriptRoot 'toolchain'
+$toolkit = $PSScriptRoot
+if (Test-Path (Join-Path $PSScriptRoot 'toolchain.py')) {
+    $toolkit = Split-Path -Parent $PSScriptRoot
+}
+$root = Join-Path $toolkit 'toolchain'
 New-Item -ItemType Directory -Force $root | Out-Null
 function Download-Checked($url, $file, $expected, $algorithm = 'SHA256') {
     Invoke-WebRequest -Uri $url -OutFile $file -UseBasicParsing
@@ -14,7 +18,39 @@ function Run-Checked($exe, [string[]]$arguments) {
     & $exe @arguments
     if ($LASTEXITCODE -ne 0) { throw "Failed: $exe ($LASTEXITCODE)" }
 }
-$temp = Join-Path ([IO.Path]::GetTempPath()) ("CelesteTools-" + [guid]::NewGuid())
+$cache = Join-Path $root 'cache'
+$locations = @{
+    DOTNET_CLI_HOME = 'dotnet-home'
+    NUGET_PACKAGES = 'nuget/packages'
+    NUGET_HTTP_CACHE_PATH = 'nuget/http'
+    NUGET_PLUGINS_CACHE_PATH = 'nuget/plugins'
+    NUGET_SCRATCH = 'nuget/scratch'
+    TEMP = 'temp'
+    TMP = 'temp'
+    TMPDIR = 'temp'
+    HOME = 'home'
+    USERPROFILE = 'home'
+    APPDATA = 'home/AppData/Roaming'
+    LOCALAPPDATA = 'home/AppData/Local'
+    XDG_CONFIG_HOME = 'config'
+    XDG_CACHE_HOME = 'xdg'
+}
+foreach ($name in $locations.Keys) {
+    $value = Join-Path $cache $locations[$name]
+    New-Item -ItemType Directory -Force $value | Out-Null
+    [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+}
+$env:GIT_CONFIG_NOSYSTEM = '1'
+$env:GIT_CONFIG_GLOBAL = Join-Path $cache 'home/.gitconfig'
+$env:DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = 'true'
+$env:DOTNET_MULTILEVEL_LOOKUP = '0'
+$env:MSBUILDDISABLENODEREUSE = '1'
+$nugetConfig = Join-Path $cache 'NuGet.Config'
+@'
+<?xml version="1.0" encoding="utf-8"?>
+<configuration><packageSources><clear/><add key="nuget.org" value="https://api.nuget.org/v3/index.json"/></packageSources></configuration>
+'@ | Set-Content -Encoding UTF8 $nugetConfig
+$temp = Join-Path $env:TEMP ("CelesteTools-" + [guid]::NewGuid())
 New-Item -ItemType Directory $temp | Out-Null
 try {
     # Microsoft release metadata supplies the SHA512 for the exact pinned SDK.
@@ -36,7 +72,7 @@ try {
     $env:PATH = "$dotnet;$env:PATH"
     $ilspy = Join-Path $root 'ilspy'
     if (-not (Test-Path (Join-Path $ilspy 'ilspycmd.exe'))) {
-        Run-Checked (Join-Path $dotnet 'dotnet.exe') @('tool','install','ilspycmd','--version','8.0.0.7246-preview3','--tool-path',$ilspy,'--add-source','https://api.nuget.org/v3/index.json')
+        Run-Checked (Join-Path $dotnet 'dotnet.exe') @('tool','install','ilspycmd','--version','8.0.0.7246-preview3','--tool-path',$ilspy,'--configfile',$nugetConfig)
     }
     $git = Join-Path $root 'git'
     if (-not (Test-Path (Join-Path $git 'cmd/git.exe'))) {

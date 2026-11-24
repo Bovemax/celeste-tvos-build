@@ -14,7 +14,10 @@ from toolchain import environment, find
 def run(args, cwd=None):
     env = environment()
     args = list(args)
-    args[0] = find(str(args[0])) or str(args[0])
+    executable = find(str(args[0]))
+    if not executable:
+        raise ValueError("Missing portable tool: " + str(args[0]))
+    args[0] = executable
     subprocess.run([str(a) for a in args], cwd=cwd, env=env, check=True)
 
 def build(staged, patches, output):
@@ -49,7 +52,7 @@ def build(staged, patches, output):
         projects = list(source.glob("*.csproj")) + list(source.glob("*/*.csproj"))
         if len(projects) != 1:
             raise ValueError("Expected exactly one decompiled project")
-        run(["dotnet", "publish", projects[0], "-c", "Release"])
+        run(["dotnet", "publish", projects[0], "-c", "Release", "--disable-build-servers"], cwd=source)
         binaries = list(projects[0].parent.glob("bin/Release/**/Celeste.exe"))
         if not binaries:
             raise ValueError("No patched Celeste.exe produced")
