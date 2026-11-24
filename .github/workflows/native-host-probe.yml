@@ -1,0 +1,122 @@
+name: Native library host integration
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/native-host-probe.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: relink-fixtures
+          run-id: 45446949250
+          github-token: ${{ github.token }}
+          path: probe
+      - name: Link original native archive with reusable Windows tool
+        run: python tools/link_native.py probe/Probe.dylib probe/liblocal.a --object probe/main.o
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-linked-native-probe
+          path: probe/Probe.dylib
+          if-no-files-found: error
+  host:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet workload install tvos
+      - name: Create independent host and payload
+        run: |
+          mkdir -p host payload
+          cat > host/Host.csproj <<'EOF'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net10.0-tvos</TargetFramework>
+              <OutputType>Exe</OutputType>
+              <RuntimeIdentifier>tvos-arm64</RuntimeIdentifier>
+              <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+              <ApplicationId>org.example.nativehostprobe</ApplicationId>
+              <ApplicationTitle>Native Host Probe</ApplicationTitle>
+              <UseInterpreter>true</UseInterpreter>
+              <TrimMode>copy</TrimMode>
+            </PropertyGroup>
+          </Project>
+          EOF
+          cat > host/Info.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleIdentifier</key><string>org.example.nativehostprobe</string>
+          <key>CFBundleVersion</key><string>1</string>
+          <key>CFBundleShortVersionString</key><string>1.0</string>
+          <key>UIDeviceFamily</key><array><integer>3</integer></array>
+          </dict></plist>
+          EOF
+          cat > host/Program.cs <<'EOF'
+          using System;
+          using System.IO;
+          using System.Reflection;
+          using System.Runtime.InteropServices;
+          using UIKit;
+          using Foundation;
+          using GameController;
+          UIApplication.Main(args, null, typeof(AppDelegate));
+          [Register("AppDelegate")]
+          public class AppDelegate : UIApplicationDelegate {
+            public override UIWindow Window { get; set; }
+            [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+            private delegate int NativeProbe();
+            public override bool FinishedLaunching(UIApplication app, NSDictionary options) {
+              var bundle = NSBundle.MainBundle.BundlePath;
+              var result = "";
+              try {
+                var path = Path.Combine(bundle, "Frameworks", "Probe.framework", "Probe");
+                var handle = NativeLibrary.Load(path);
+                var fn = Marshal.GetDelegateForFunctionPointer<NativeProbe>(NativeLibrary.GetExport(handle, "supplied"));
+                result += "Native call: " + fn() + "\n";
+              } catch (Exception e) { result += "Native failure: " + e + "\n"; }
+              try {
+                var asm = Assembly.Load(File.ReadAllBytes(Path.Combine(bundle, "Payload.dll")));
+                result += "Managed call: " + asm.GetType("Probe", true).GetMethod("Run").Invoke(null, null) + "\n";
+              } catch (Exception e) { result += "Managed failure: " + e + "\n"; }
+              result += "Controllers: " + GCController.Controllers.Length;
+              Console.WriteLine(result);
+              Window = new UIWindow(UIScreen.MainScreen.Bounds);
+              var vc = new UIViewController();
+              vc.View.BackgroundColor = UIColor.Black;
+              vc.View.AddSubview(new UILabel(vc.View.Bounds) { Text = result, Lines = 0, TextAlignment = UITextAlignment.Center, TextColor = UIColor.White });
+              Window.RootViewController = vc;
+              Window.MakeKeyAndVisible();
+              return true;
+            }
+          }
+          EOF
+          cat > payload/Payload.csproj <<'EOF'
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>
+          EOF
+          echo 'public static class Probe { public static string Run() => "OK"; }' > payload/Probe.cs
+          dotnet publish host/Host.csproj -c Release -r tvos-arm64 -p:EnableCodeSigning=false -p:ValidateXcodeVersion=false -p:BuildIpa=false
+          dotnet build payload/Payload.csproj -c Release
+          APP=$(find host/bin -name '*.app' -type d -print -quit)
+          test -n "$APP"
+          mkdir -p out/Payload
+          ditto "$APP" out/Payload/Host.app
+          cp payload/bin/Release/net10.0/Payload.dll out/Payload/Host.app/
+          ditto -c -k --keepParent out/Payload out/Native-host.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-host-base
+          path: out/Native-host.ipa
+          if-no-files-found: error
