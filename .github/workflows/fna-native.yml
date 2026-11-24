@@ -55,7 +55,7 @@ jobs:
           build "$src/Theorafile/Xcode-iOS/theorafile.xcodeproj" theorafile
           for name in SDL2 FNA3D FAudio theorafile; do
             test -s "$builds/lib$name.a"
-            xcrun lipo -verify_arch arm64 "$builds/lib$name.a"
+            xcrun lipo "$builds/lib$name.a" -verify_arch arm64
           done
           # The pinned FNA3D Xcode project enables its Metal renderer. No
           # MoltenVK, unlicensed third-party stubs, FMOD, or private inputs.
@@ -84,7 +84,7 @@ jobs:
       - name: Verify tvOS platform and representative exported functions
         run: |
           set -euo pipefail
-          xcrun lipo -verify_arch arm64 native-out/CelesteNative.dylib
+          xcrun lipo native-out/CelesteNative.dylib -verify_arch arm64
           xcrun vtool -show-build native-out/CelesteNative.dylib | tee build-version.txt
           grep -i 'platform TVOS' build-version.txt
           xcrun otool -L native-out/CelesteNative.dylib
