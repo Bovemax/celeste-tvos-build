@@ -1,0 +1,66 @@
+name: Combined native and managed IPA
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/combine-native-probe.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-host-base
+          run-id: 45448357864
+          github-token: ${{ github.token }}
+          path: host
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-linked-native-probe
+          run-id: 45448357864
+          github-token: ${{ github.token }}
+          path: native
+      - name: Assemble unsigned framework and IPA
+        shell: python
+        run: |
+          import pathlib, zipfile, plistlib, struct
+          host = next(pathlib.Path("host").rglob("Native-host.ipa"))
+          lib = next(pathlib.Path("native").rglob("Probe.dylib"))
+          binary = lib.read_bytes()
+          assert struct.unpack_from("<II", binary) == (0xfeedfacf, 0x100000c)
+          with zipfile.ZipFile(host) as src:
+              names = src.namelist()
+              roots = {n.split("/")[1] for n in names if n.startswith("Payload/") and len(n.split("/")) >= 3 and n.split("/")[1].endswith(".app")}
+              assert len(roots) == 1
+              root = "Payload/" + roots.pop() + "/"
+              assert root + "Payload.dll" in names
+              assert not any(n.startswith(root + "_CodeSignature/") for n in names)
+              metadata = plistlib.loads(src.read(root + "Info.plist"))
+              assert 3 in metadata["UIDeviceFamily"]
+              framework = root + "Frameworks/Probe.framework/"
+              info = {"CFBundleIdentifier":"org.example.nativehostprobe.probe","CFBundleExecutable":"Probe","CFBundleName":"Probe","CFBundlePackageType":"FMWK","CFBundleVersion":"1","CFBundleShortVersionString":"1.0","CFBundleSupportedPlatforms":["AppleTVOS"],"MinimumOSVersion":"15.0","UIDeviceFamily":[3]}
+              with zipfile.ZipFile("Combined-test.ipa","x",compression=zipfile.ZIP_DEFLATED) as dst:
+                  for entry in src.infolist():
+                      dst.writestr(entry, src.read(entry))
+                  entry = zipfile.ZipInfo(framework + "Probe")
+                  entry.create_system = 3
+                  entry.external_attr = 0o100755 << 16
+                  dst.writestr(entry,binary)
+                  dst.writestr(framework + "Info.plist",plistlib.dumps(info))
+          with zipfile.ZipFile("Combined-test.ipa") as result:
+              assert result.testzip() is None
+              assert result.read(framework + "Probe") == binary
+              assert len(result.namelist()) == len(set(result.namelist()))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: combined-native-managed-unsigned
+          path: Combined-test.ipa
+          if-no-files-found: error
+          retention-days: 14
