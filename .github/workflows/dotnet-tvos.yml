@@ -9,7 +9,7 @@ permissions:
 jobs:
   app:
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - uses: actions/setup-dotnet@v4
         with:
