@@ -28,7 +28,7 @@ def check(archive, content):
             if name.startswith("managed/") and not data.startswith(b"MZ"):
                 errors.append("Not a PE file: " + name)
             if name.startswith("native/") and not data.startswith(b"!<arch>\n"):
-                errors.append("Not a thin static archive: " + name)
+                errors.append("Not a standard static archive: " + name)
     if not content.is_dir() or not any(p.is_file() for p in content.rglob("*")):
         errors.append("Content directory is missing or empty")
     return errors
