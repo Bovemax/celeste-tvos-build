@@ -1,0 +1,76 @@
+name: .NET tvOS AOT smoke test
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/dotnet-tvos.yml'
+permissions:
+  contents: read
+jobs:
+  app:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install tvOS workload
+        run: |
+          xcodebuild -version
+          dotnet workload install tvos
+      - name: Create original test application
+        run: |
+          mkdir smoke
+          cd smoke
+          cat > Smoke.csproj <<'EOF'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net10.0-tvos</TargetFramework>
+              <OutputType>Exe</OutputType>
+              <RuntimeIdentifier>tvos-arm64</RuntimeIdentifier>
+              <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+              <ApplicationId>org.example.tvossmoke</ApplicationId>
+              <ApplicationTitle>tvOS Smoke Test</ApplicationTitle>
+              <MtouchNoSymbolStrip>true</MtouchNoSymbolStrip>
+              <TrimMode>copy</TrimMode>
+              <_ExportSymbolsExplicitly>false</_ExportSymbolsExplicitly>
+              <MtouchExtraArgs>--cxx --gcc_flags "-framework Foundation -framework UIKit -framework AudioToolbox -framework AVFoundation -framework CoreGraphics -framework Metal -framework QuartzCore -framework GameController -framework CoreBluetooth -framework IOSurface"</MtouchExtraArgs>
+            </PropertyGroup>
+          </Project>
+          EOF
+          cat > Info.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleIdentifier</key><string>org.example.tvossmoke</string>
+          <key>CFBundleVersion</key><string>1</string>
+          <key>CFBundleShortVersionString</key><string>1.0</string>
+          <key>UIDeviceFamily</key><array><integer>3</integer></array>
+          </dict></plist>
+          EOF
+          cat > Program.cs <<'EOF'
+          using UIKit;
+          using Foundation;
+          using GameController;
+          using AVFoundation;
+          using System;
+          UIApplication.Main(args, null, typeof(AppDelegate));
+          [Register("AppDelegate")]
+          public class AppDelegate : UIApplicationDelegate {
+            public override bool FinishedLaunching(UIApplication application, NSDictionary? options) {
+              Console.WriteLine(GCController.Controllers.Length);
+              Console.WriteLine(AVAudioSession.SharedInstance().Category);
+              return true;
+            }
+          }
+          EOF
+      - name: AOT compile and link
+        run: |
+          dotnet publish smoke/Smoke.csproj -c Release -r tvos-arm64 -p:EnableCodeSigning=false -p:ValidateXcodeVersion=false -p:BuildIpa=false
+          find smoke/bin -name '*.app' -type d
+          APP=$(find smoke/bin -name '*.app' -type d -print -quit)
+          test -n "$APP"
+          plutil -lint "$APP/Info.plist"
+          file "$APP/Smoke"
+          xcrun vtool -show-build "$APP/Smoke"
+          otool -L "$APP/Smoke"
