@@ -1,0 +1,100 @@
+name: tvOS dynamic managed assembly experiment
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/interpreter.yml'
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet workload install tvos
+      - name: Generate original host and independent payload
+        run: |
+          mkdir -p host payload
+          cat > host/Host.csproj <<'EOF'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net10.0-tvos</TargetFramework>
+              <OutputType>Exe</OutputType>
+              <RuntimeIdentifier>tvos-arm64</RuntimeIdentifier>
+              <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+              <ApplicationId>org.example.interpretersmoke</ApplicationId>
+              <ApplicationTitle>Interpreter Smoke</ApplicationTitle>
+              <UseInterpreter>true</UseInterpreter>
+              <TrimMode>copy</TrimMode>
+            </PropertyGroup>
+          </Project>
+          EOF
+          cat > host/Info.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleIdentifier</key><string>org.example.interpretersmoke</string>
+          <key>CFBundleVersion</key><string>1</string>
+          <key>CFBundleShortVersionString</key><string>1.0</string>
+          <key>UIDeviceFamily</key><array><integer>3</integer></array>
+          </dict></plist>
+          EOF
+          cat > host/Program.cs <<'EOF'
+          using System;
+          using System.IO;
+          using System.Reflection;
+          using UIKit;
+          using Foundation;
+          UIApplication.Main(args, null, typeof(AppDelegate));
+          [Register("AppDelegate")]
+          public class AppDelegate : UIApplicationDelegate {
+            public override UIWindow Window { get; set; }
+            public override bool FinishedLaunching(UIApplication application, NSDictionary options) {
+              string result;
+              try {
+                var path = Path.Combine(NSBundle.MainBundle.BundlePath, "Payload.dll");
+                var asm = Assembly.Load(File.ReadAllBytes(path));
+                result = (string)asm.GetType("Probe", true).GetMethod("Run").Invoke(null, null);
+              } catch (Exception e) { result = e.ToString(); }
+              Console.WriteLine(result);
+              Window = new UIWindow(UIScreen.MainScreen.Bounds);
+              var vc = new UIViewController();
+              var label = new UILabel(vc.View.Bounds) { Text = result, Lines = 0, TextAlignment = UITextAlignment.Center, TextColor = UIColor.White };
+              vc.View.BackgroundColor = UIColor.Black;
+              vc.View.AddSubview(label);
+              Window.RootViewController = vc;
+              Window.MakeKeyAndVisible();
+              return true;
+            }
+          }
+          EOF
+          cat > payload/Payload.csproj <<'EOF'
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>
+          EOF
+          echo 'public static class Probe { public static string Run() => "DYNAMIC DLL EXECUTED"; }' > payload/Probe.cs
+      - name: Build host without payload reference
+        run: |
+          dotnet publish host/Host.csproj -c Release -r tvos-arm64 -p:EnableCodeSigning=false -p:ValidateXcodeVersion=false -p:BuildIpa=false
+          APP=$(find host/bin -name '*.app' -type d -print -quit)
+          test -n "$APP"
+          mkdir -p out/Payload
+          ditto "$APP" "out/Payload/Host.app"
+          ditto -c -k --keepParent out/Payload out/Host-only.ipa
+      - name: Build independent managed payload and package test
+        run: |
+          dotnet build payload/Payload.csproj -c Release
+          cp payload/bin/Release/net10.0/Payload.dll out/Payload/Host.app/Payload.dll
+          ditto -c -k --keepParent out/Payload out/Interpreter-test.ipa
+          unzip -l out/Interpreter-test.ipa | tail -20
+      - uses: actions/upload-artifact@v4
+        with:
+          name: interpreter-smoke-unsigned
+          path: |
+            out/Host-only.ipa
+            out/Interpreter-test.ipa
+            payload/bin/Release/net10.0/Payload.dll
+          if-no-files-found: error
+          retention-days: 7
