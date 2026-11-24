@@ -47,7 +47,11 @@ jobs:
           ditto -c -k --keepParent out/Payload out/GameHost-base.ipa
           unzip -t out/GameHost-base.ipa | tail -1
           xcrun vtool -show-build out/Payload/GameHost.app/GameHost
-          cp upstream-fna/LICENSE out/FNA-LICENSE.txt
+          for notice in upstream-fna/licenses/LICENSE upstream-fna/licenses/lzxdecoder.LICENSE upstream-fna/licenses/monoxna.LICENSE; do
+            test -s "$notice"
+            printf '\n--- %s ---\n' "$(basename "$notice")" >> out/FNA-LICENSE.txt
+            cat "$notice" >> out/FNA-LICENSE.txt
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: fna-game-host-base-unsigned
