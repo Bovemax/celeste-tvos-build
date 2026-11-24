@@ -1,46 +1,85 @@
 import pathlib
 import plistlib
+import struct
 import tempfile
 import unittest
 import zipfile
 from package_game import package
 
+def synthetic_dylib(path, name, platform=3):
+    # Original synthetic Mach-O header fixture; not executable.
+    identity = ("@rpath/" + name + ".framework/" + name).encode() + b"\0"
+    identity += b"\0" * ((-len(identity)) % 8)
+    commands = struct.pack("<6I", 0x32, 24, platform, 0xF0000, 0x1A0000, 0)
+    commands += struct.pack("<6I", 0xd, 24 + len(identity), 24, 0, 0, 0) + identity
+    path.write_bytes(struct.pack("<8I", 0xfeedfacf, 0x100000c, 0, 6, 2, len(commands), 1, 0) + commands)
+
 class GamePackageTests(unittest.TestCase):
-    def test_local_bundle(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = pathlib.Path(tmp)
-            host = root / "host.ipa"
-            managed = root / "managed"
-            content = root / "Content"
-            managed.mkdir()
-            content.mkdir()
-            for name in ("Celeste.dll", "Celeste.Content.dll"):
-                (managed / name).write_bytes(b"MZfixture")
-            (content / "example.txt").write_bytes(b"fixture")
-            prefix = "Payload/Host.app/"
-            def make_host(version):
-                with zipfile.ZipFile(host, "w") as z:
-                    z.writestr(prefix + "Info.plist", plistlib.dumps({
-                        "UIDeviceFamily": [3], "CFBundleExecutable": "Host",
-                        "CelesteLocalPayloadVersion": version}))
-                    info = zipfile.ZipInfo(prefix + "Host")
-                    info.create_system = 3
-                    info.external_attr = 0o100755 << 16
-                    z.writestr(info, b"fixture")
-            out = root / "output.ipa"
-            make_host(0)
-            with self.assertRaises(ValueError):
-                package(host, managed, content, out)
-            self.assertFalse(out.exists())
-            make_host(1)
-            package(host, managed, content, out)
-            with zipfile.ZipFile(out) as z:
-                self.assertEqual(z.read(prefix + "GameAssemblies/Celeste.dll"), b"MZfixture")
-                self.assertEqual(z.read(prefix + "Content/example.txt"), b"fixture")
-                self.assertEqual(z.getinfo(prefix + "Host").external_attr >> 16, 0o100755)
-                self.assertIsNone(z.testzip())
-            with self.assertRaises(ValueError):
-                package(host, managed, content, out)
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = pathlib.Path(self.tmp.name)
+        self.host = self.root / "host.ipa"
+        self.managed = self.root / "managed"
+        self.content = self.root / "Content"
+        self.managed.mkdir()
+        self.content.mkdir()
+        for name in ("Celeste.dll", "Celeste.Content.dll"):
+            (self.managed / name).write_bytes(b"MZfixture")
+        (self.content / "example.txt").write_bytes(b"fixture")
+        self.native = self.root / "CelesteNative.dylib"
+        self.fmod = self.root / "FMODLocal.dylib"
+        synthetic_dylib(self.native, "CelesteNative")
+        synthetic_dylib(self.fmod, "FMODLocal")
+        self.prefix = "Payload/Host.app/"
+        self.output = self.root / "output.ipa"
+
+    def make_host(self, version=2):
+        with zipfile.ZipFile(self.host, "w") as z:
+            z.writestr(self.prefix + "Info.plist", plistlib.dumps({
+                "UIDeviceFamily": [3], "CFBundleExecutable": "Host",
+                "CelesteLocalPayloadVersion": version}))
+            info = zipfile.ZipInfo(self.prefix + "Host")
+            info.create_system = 3
+            info.external_attr = 0o100755 << 16
+            z.writestr(info, b"fixture")
+
+    def test_game_package(self):
+        self.make_host()
+        package(self.host, self.managed, self.content, self.output, self.native, self.fmod)
+        with zipfile.ZipFile(self.output) as z:
+            self.assertEqual(z.read(self.prefix + "GameAssemblies/Celeste.dll"), b"MZfixture")
+            self.assertEqual(z.read(self.prefix + "GameAssemblies/Content/example.txt"), b"fixture")
+            for name in ("CelesteNative", "FMODLocal"):
+                p = self.prefix + "Frameworks/" + name + ".framework/"
+                self.assertEqual(z.getinfo(p + name).external_attr >> 16, 0o100755)
+                self.assertEqual(plistlib.loads(z.read(p + "Info.plist"))["CFBundleExecutable"], name)
+            self.assertEqual(z.getinfo(self.prefix + "Host").external_attr >> 16, 0o100755)
+            self.assertIsNone(z.testzip())
+        with self.assertRaises(ValueError):
+            package(self.host, self.managed, self.content, self.output, self.native, self.fmod)
+
+    def test_probe_package(self):
+        self.make_host()
+        package(self.host, None, None, self.output, self.native, probe=True)
+        with zipfile.ZipFile(self.output) as z:
+            self.assertIn(self.prefix + "GameAssemblies/Content/probe.txt", z.namelist())
+            self.assertNotIn(self.prefix + "GameAssemblies/Celeste.dll", z.namelist())
+
+    def test_invalid_host_and_platform(self):
+        self.make_host(1)
+        with self.assertRaises(ValueError):
+            package(self.host, None, None, self.output, self.native, probe=True)
+        self.make_host()
+        synthetic_dylib(self.native, "CelesteNative", platform=8)
+        with self.assertRaises(ValueError):
+            package(self.host, None, None, self.output, self.native, probe=True)
+        self.assertFalse(self.output.exists())
+
+    def test_missing_fmod(self):
+        self.make_host()
+        with self.assertRaises(ValueError):
+            package(self.host, self.managed, self.content, self.output, self.native)
 
 if __name__ == "__main__":
     unittest.main()
