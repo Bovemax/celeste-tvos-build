@@ -1,0 +1,55 @@
+name: Native relink feasibility
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/relink-probe.yml'
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - name: Prepare original ARM64 tvOS object fixtures
+        run: |
+          set -eu
+          mkdir probe
+          printf 'int supplied(void); int main(void) { return supplied(); }\n' > probe/main.c
+          printf 'int supplied(void) { return 0; }\n' > probe/local.c
+          xcrun --sdk appletvos clang -arch arm64 -mtvos-version-min=15.0 -c probe/main.c -o probe/main.o
+          xcrun --sdk appletvos clang -arch arm64 -mtvos-version-min=15.0 -c probe/local.c -o probe/local.o
+          xcrun ar rcs probe/liblocal.a probe/local.o
+          # Only original object fixtures leave this runner; no Apple SDK files.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relink-fixtures
+          path: |
+            probe/main.o
+            probe/liblocal.a
+  windows:
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: relink-fixtures
+          path: probe
+      - name: Locate LLVM Mach-O linker
+        shell: pwsh
+        run: |
+          $linker = Get-Command ld64.lld -ErrorAction SilentlyContinue
+          if (-not $linker) { throw "Mach-O LLD is not installed on this runner" }
+          & $linker.Source --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test static archive resolution without SDK
+        shell: pwsh
+        run: |
+          # A relocatable object/archive experiment only, not a launchable app.
+          $linker = (Get-Command ld64.lld).Source
+          & $linker -arch arm64 -platform_version tvos 15.0 26.0 -dylib -install_name '@rpath/Probe.dylib' -o probe/Probe.dylib -undefined error probe/main.o probe/liblocal.a
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $reader = (Get-Command llvm-readobj).Source
+          & $reader --file-headers --macho-version-min --symbols probe/Probe.dylib
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
