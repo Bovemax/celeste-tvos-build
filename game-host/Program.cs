@@ -61,6 +61,9 @@ internal static class Program
             Environment.SetEnvironmentVariable("FNA_GRAPHICS_ENABLE_HIGHDPI", "1");
             Environment.SetEnvironmentVariable("FNA3D_FORCE_DRIVER", "Metal");
             SDL_SetHint("SDL_JOYSTICK_MFI", "1");
+            // A Siri Remote is not a gameplay controller; keep Player One for a full gamepad.
+            if (SDL_SetHint("SDL_TV_REMOTE_AS_JOYSTICK", "0") == 0)
+                Console.Error.WriteLine("Could not disable Siri Remote joystick mapping");
             SDL_SetHint("SDL_ACCELEROMETER_AS_JOYSTICK", "0");
             SDL_SetHint("SDL_TOUCH_MOUSE_EVENTS", "0");
             SDL_SetHint("SDL_MOUSE_TOUCH_EVENTS", "0");
