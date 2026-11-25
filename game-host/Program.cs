@@ -17,6 +17,8 @@ internal static class Program
     private static readonly string Payload = Path.Combine(Bundle, "GameAssemblies");
     private static IntPtr nativeHandle, fmodHandle;
     private static string startupError = "";
+    private static string stage = "Host setup";
+    private static UIWindow? diagnosticWindow;
     private static readonly SdlMain Callback = Run;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -35,7 +37,10 @@ internal static class Program
 
     private static IntPtr Resolve(string name, Assembly asm, DllImportSearchPath? search)
     {
-        switch (name.ToLowerInvariant())
+        var key = name.ToLowerInvariant();
+        foreach (var suffix in new[] { ".dll", ".dylib", ".so" })
+            if (key.EndsWith(suffix, StringComparison.Ordinal)) { key = key[..^suffix.Length]; break; }
+        switch (key)
         {
             case "sdl2": case "lib sdl2": case "libsdl2":
             case "fna3d": case "libfna3d":
@@ -105,17 +110,22 @@ internal static class Program
     {
         try
         {
+            stage = "Prepare writable location";
             PrepareWritableLocation();
             Console.WriteLine("Apple controllers: " + GCController.Controllers.Length);
             if (!File.Exists(Path.Combine(Payload, "Celeste.dll")))
                 RunProbe();
             else
+            {
                 RunGame();
+                ShowDiagnostic("Game entry point returned without an active game loop.", null);
+            }
             return 0;
         }
         catch (Exception e)
         {
             Console.Error.WriteLine(e);
+            ShowDiagnostic("Startup exception", e);
             return 1;
         }
     }
@@ -132,6 +142,7 @@ internal static class Program
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void RunGame()
     {
+        stage = "Verify packaged game files";
         if (!File.Exists(Path.Combine(Payload, "Celeste.Content.dll")))
             throw new FileNotFoundException("Missing Celeste.Content.dll");
         if (!Directory.Exists(Path.Combine(Payload, "Content")))
@@ -146,19 +157,23 @@ internal static class Program
             NativeLibrary.SetDllImportResolver(a, Resolve);
             return a;
         };
+        stage = "Load and invoke Celeste";
         InvokePayload("Celeste.dll", true);
     }
 
     internal static object? InvokePayload(string file, bool game = false)
     {
+        if (game) stage = "Load Celeste.dll";
         var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(Payload, file));
         NativeLibrary.SetDllImportResolver(assembly, Resolve);
+        if (game) stage = "Find game entry point";
         var entry = assembly.EntryPoint;
         if (entry == null && game)
             entry = assembly.GetType("Celeste.Celeste", true)!
                 .GetMethod("Main", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
         if (entry == null || !entry.IsStatic)
             throw new MissingMethodException("No static game entry point");
+        if (game) stage = "Invoke " + entry.DeclaringType?.FullName + "." + entry.Name;
         var parameters = entry.GetParameters();
         if (parameters.Length == 0)
             return entry.Invoke(null, null);
@@ -166,6 +181,55 @@ internal static class Program
             return entry.Invoke(null, new object[] { Array.Empty<string>() });
         else
             throw new NotSupportedException("Unexpected game entry point signature");
+    }
+
+    private static void ShowDiagnostic(string summary, Exception? error)
+    {
+        // SDL's UIKit delegate continues the event loop after its main callback
+        // returns. Keep a strong reference to a separate window, above SDL's
+        // launch window, instead of trying to start UIApplication a second time.
+        var detail = error?.ToString() ?? "";
+        if (error is TargetInvocationException && error.InnerException != null)
+            detail = error.InnerException.ToString();
+        try
+        {
+            foreach (var name in new[] { "error_log.txt", "ErrorLog.txt", "errorlog.txt" })
+            {
+                var path = Path.Combine(Directory.GetCurrentDirectory(), name);
+                if (!File.Exists(path)) continue;
+                using var reader = new StreamReader(path);
+                var buffer = new char[1800];
+                int count = reader.ReadBlock(buffer, 0, buffer.Length);
+                detail += "\nGame log: " + new string(buffer, 0, count);
+                break;
+            }
+        }
+        catch (Exception logError) { Console.Error.WriteLine(logError); }
+        var message = summary + "\nStage: " + stage + "\n" + detail;
+        Console.Error.WriteLine(message);
+        try
+        {
+            diagnosticWindow = new UIWindow(UIScreen.MainScreen.Bounds);
+            var controller = new UIViewController();
+            controller.View!.BackgroundColor = UIColor.Black;
+            var bounds = controller.View.Bounds;
+            if (bounds.Width < 200 || bounds.Height < 200) bounds = UIScreen.MainScreen.Bounds;
+            controller.View.AddSubview(new UILabel(new CoreGraphics.CGRect(
+                70, 60, bounds.Width - 140, bounds.Height - 120))
+            {
+                Text = message.Length > 2200 ? message[..2200] : message,
+                Lines = 0,
+                Font = UIFont.SystemFontOfSize(25),
+                AdjustsFontSizeToFitWidth = true,
+                MinimumScaleFactor = 0.5f,
+                TextAlignment = UITextAlignment.Left,
+                TextColor = UIColor.White
+            });
+            diagnosticWindow.RootViewController = controller;
+            diagnosticWindow.WindowLevel = UIWindowLevel.Alert;
+            diagnosticWindow.MakeKeyAndVisible();
+        }
+        catch (Exception displayError) { Console.Error.WriteLine(displayError); }
     }
 
     [Register("DiagnosticDelegate")]
