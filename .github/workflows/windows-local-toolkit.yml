@@ -95,6 +95,14 @@ jobs:
             toolkit/_runtime-CelesteLinkFMOD/
           if-no-files-found: error
           retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-build-repair
+          path: |
+            toolkit/CelesteLocalBuild.exe
+            toolkit/_runtime-CelesteLocalBuild/
+          if-no-files-found: error
+          retention-days: 30
       - name: Find latest successful host
         id: host
         shell: pwsh
