@@ -47,8 +47,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m PyInstaller --clean --noconfirm --onedir --contents-directory _runtime-CelesteExtractLLVM --name CelesteExtractLLVM --distpath frozen tools/extract_llvm.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m PyInstaller --clean --noconfirm --onedir --contents-directory _runtime-CelesteLinkFMOD --name CelesteLinkFMOD --distpath frozen tools/link_fmod_local.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force toolkit | Out-Null
-          foreach ($name in @("CelesteLocalBuild", "CelestePackage", "CelestePrepareInputs", "CelesteExtractLLVM")) {
+          foreach ($name in @("CelesteLocalBuild", "CelestePackage", "CelestePrepareInputs", "CelesteExtractLLVM", "CelesteLinkFMOD")) {
             Move-Item "frozen/$name/$name.exe" toolkit
             Move-Item "frozen/$name/_runtime-$name" toolkit
           }
@@ -58,7 +60,7 @@ jobs:
           Move-Item toolkit $relocated
           Push-Location $env:RUNNER_TEMP
           try {
-            foreach ($name in @("CelesteLocalBuild", "CelestePackage", "CelestePrepareInputs", "CelesteExtractLLVM")) {
+            foreach ($name in @("CelesteLocalBuild", "CelestePackage", "CelestePrepareInputs", "CelesteExtractLLVM", "CelesteLinkFMOD")) {
               & (Join-Path $relocated "$name.exe") --help
               if ($LASTEXITCODE -ne 0) { throw "$name failed from relocated directory" }
             }
@@ -83,6 +85,14 @@ jobs:
         with:
           name: portable-toolchain-repair
           path: repair/
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: experimental-fmod-local-linker
+          path: |
+            toolkit/CelesteLinkFMOD.exe
+            toolkit/_runtime-CelesteLinkFMOD/
           if-no-files-found: error
           retention-days: 30
       - name: Find latest successful host
