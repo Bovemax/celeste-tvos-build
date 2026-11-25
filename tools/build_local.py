@@ -8,12 +8,25 @@ import pathlib
 import subprocess
 from stage_game_inputs import stage
 from patch_game import build
-from tvos_compat import repair_source
+from tvos_compat import repair_source, audit_native
 import sys
 from link_native import link, verify_tvos_dylib
 from package_game import package
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--audit-native":
+        p = argparse.ArgumentParser(description="Check local decompiled native declarations against Mach-O external symbols.")
+        p.add_argument("--audit-native", type=pathlib.Path, required=True)
+        p.add_argument("--native", type=pathlib.Path, required=True)
+        p.add_argument("--fmod", type=pathlib.Path, required=True)
+        args = p.parse_args()
+        try:
+            verify_tvos_dylib(args.native, "@rpath/CelesteNative.framework/CelesteNative")
+            verify_tvos_dylib(args.fmod, "@rpath/FMODLocal.framework/FMODLocal")
+            audit_native(args.audit_native, args.native, args.fmod)
+        except (OSError, ValueError, subprocess.CalledProcessError) as e:
+            p.exit(1, f"Native audit failed: {e}\n")
+        return
     if len(sys.argv) > 1 and sys.argv[1] == "--repair-source":
         p = argparse.ArgumentParser(description="Patch and audit an existing local decompiled source tree.")
         p.add_argument("--repair-source", type=pathlib.Path, required=True)

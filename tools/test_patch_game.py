@@ -71,3 +71,38 @@ class TvOSCompatibilityTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Unreviewed GC latency"):
                 repair_source(root)
             self.assertEqual(engine.read_text(encoding="utf-8"), text)
+
+
+    def test_error_log_repair_and_entry_assembly_warning(self):
+        from tvos_compat import repair_source
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            engine = root / "Monocle" / "Engine.cs"
+            engine.parent.mkdir()
+            engine.write_text("void Start() {}\n", encoding="utf-8")
+            errorlog = engine.parent / "ErrorLog.cs"
+            errorlog.write_text("void Open() {\n  Process.Start(Filename);\n}\n", encoding="utf-8")
+            other = root / "Example.cs"
+            other.write_text("var a = Assembly.GetEntryAssembly();\nProcess.Start(Filename);\n", encoding="utf-8")
+            log = []
+            self.assertEqual(repair_source(root, log.append), 1)
+            self.assertIn("Console.Error.WriteLine", errorlog.read_text())
+            self.assertIn("Process.Start", other.read_text())
+            self.assertTrue(any("REVIEW loader entry-assembly" in line for line in log))
+            self.assertEqual(repair_source(root, log.append), 0)
+
+    def test_native_audit_reports_unmapped_missing_and_unrecognized(self):
+        from tvos_compat import audit_native
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "Imports.cs").write_text(
+                '[DllImport("fmod", EntryPoint = "FMOD_Actual")]\nprivate static extern int Alias();\n'
+                '[DllImport("fmodstudio")]\nprivate static extern int Missing();\n'
+                '[DllImport("fmod_SDL")]\nprivate static extern void LinuxOnly();\n'
+                '[DllImport(LibraryConstant)]\nprivate static extern int Unknown();\n',
+                encoding="utf-8")
+            log = []
+            with patch("tvos_compat.exported_symbols", side_effect=[set(), {"FMOD_Actual"}]):
+                self.assertEqual(audit_native(root, root / "native", root / "fmod", log.append), (1, 1, 1, 1))
+            self.assertTrue(any("MISSING" in line and "Missing" in line for line in log))
+            self.assertTrue(any("UNMAPPED" in line and "LinuxOnly" in line for line in log))

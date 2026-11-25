@@ -152,3 +152,13 @@ A successful package does not promise successful installation or play.
 ### tvOS content layout (v3 host)
 
 Use the matching version 3 host and packager. The game assemblies and the only copy of Content live directly under the app bundle root. This aligns FNA TitleContainer and assembly-relative game paths, including Tutorials. The packager rejects version 2 game hosts instead of producing a double-sized or incomplete IPA. The independent probe checks both ways of reading the same content fixture. No game files are uploaded; device execution remains unverified.
+
+### Local compatibility audit
+
+The local repair tool also disables the known desktop error-log launch and reports residual entry-assembly references for review. To compare native declarations against the external defined symbols of the supplied ARM64 frameworks, run:
+
+```powershell
+.\CelesteLocalBuild.exe --audit-native .\work4\patch-build\source --native .\native\CelesteNative.dylib --fmod .\inputs\native\FMODLocal.dylib
+```
+
+This requires the existing portable LLVM installation. It reports unmatched declarations and missing/unmapped symbols separately; it does not establish call reachability, ABI compatibility, or tvOS execution. Keep all game inputs local.
