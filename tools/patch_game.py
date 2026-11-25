@@ -11,6 +11,7 @@ import subprocess
 import hashlib
 import xml.etree.ElementTree as ET
 from toolchain import environment, find
+from tvos_compat import repair_source
 
 def run(args, cwd=None, check=True, capture=False):
     env = environment()
@@ -112,6 +113,7 @@ def build(staged, patches, output):
         if name == "remove-steam2.patch" and remove_steam_reference(source, patch):
             continue
         apply_patch(source, patch)
+    repair_source(source)
     projects = list(source.glob("*.csproj")) + list(source.glob("*/*.csproj"))
     if len(projects) != 1:
         raise ValueError("Expected exactly one decompiled project")

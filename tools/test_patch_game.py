@@ -39,3 +39,35 @@ class PatchTests(unittest.TestCase):
             self.assertTrue(remove_steam_reference(root, diff))
             diff.write_text(diff.read_text() + "+<UnexpectedChange />\n")
             self.assertFalse(remove_steam_reference(root, diff))
+
+
+class TvOSCompatibilityTests(unittest.TestCase):
+    def test_gc_fix_and_audit_idempotent(self):
+        from tvos_compat import repair_source
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            engine = root / "Monocle" / "Engine.cs"
+            engine.parent.mkdir()
+            engine.write_bytes(b"\xef\xbb\xbfvoid Start() {\r\n  GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;\r\n  GC.Collect();\r\n  Process.Start(\"example\");\r\n}\r\n")
+            logs = []
+            self.assertEqual(repair_source(root, logs.append), 1)
+            result = engine.read_bytes()
+            self.assertTrue(result.startswith(b"\xef\xbb\xbf"))
+            self.assertIn(b"; // tvOS:", result)
+            self.assertIn(b"\r\n  GC.Collect();", result)
+            self.assertIn(b"Process.Start", result)
+            self.assertTrue(any("Process / desktop APIs" in line for line in logs))
+            self.assertEqual(repair_source(root, logs.append), 0)
+            self.assertEqual(engine.read_bytes(), result)
+
+    def test_unrecognized_assignment_fails_without_modification(self):
+        from tvos_compat import repair_source
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            engine = root / "Monocle" / "Engine.cs"
+            engine.parent.mkdir()
+            text = "GCSettings.LatencyMode = GCLatencyMode.LowLatency;\nGCSettings.LatencyMode = ComputeMode();\n"
+            engine.write_text(text, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Unreviewed GC latency"):
+                repair_source(root)
+            self.assertEqual(engine.read_text(encoding="utf-8"), text)

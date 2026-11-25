@@ -8,10 +8,21 @@ import pathlib
 import subprocess
 from stage_game_inputs import stage
 from patch_game import build
+from tvos_compat import repair_source
+import sys
 from link_native import link, verify_tvos_dylib
 from package_game import package
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--repair-source":
+        p = argparse.ArgumentParser(description="Patch and audit an existing local decompiled source tree.")
+        p.add_argument("--repair-source", type=pathlib.Path, required=True)
+        args = p.parse_args()
+        try:
+            repair_source(args.repair_source.resolve())
+        except (OSError, ValueError) as e:
+            p.exit(1, f"Source repair failed: {e}\n")
+        return
     p = argparse.ArgumentParser(description=__doc__)
     for name in ("archive", "content", "patches", "host", "native", "work", "output"):
         p.add_argument(name, type=pathlib.Path)
