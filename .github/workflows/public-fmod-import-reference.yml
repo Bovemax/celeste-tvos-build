@@ -1,0 +1,68 @@
+name: Verify public FMOD system import reference
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/fmod_system_imports.s'
+      - 'tools/verify_import_probe.py'
+      - '.github/workflows/public-fmod-import-reference.yml'
+permissions:
+  contents: read
+jobs:
+  reference:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Link original public ABI probe against actual tvOS system libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reference
+          SDK=$(xcrun --sdk appletvos --show-sdk-path)
+          xcrun --sdk appletvos clang -arch arm64 -mtvos-version-min=15.0 -isysroot "$SDK" \
+            -dynamiclib -Wl,-undefined,error -Wl,-install_name,@rpath/FmodSystemImports.dylib \
+            tools/fmod_system_imports.s -framework AudioToolbox -lc++ \
+            -o reference/FmodSystemImports.dylib
+          python3 tools/verify_import_probe.py tools/fmod_system_imports.s reference/FmodSystemImports.dylib
+          xcrun vtool -show-build reference/FmodSystemImports.dylib
+          xcrun otool -L reference/FmodSystemImports.dylib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: public-system-import-reference
+          path: reference/FmodSystemImports.dylib
+          if-no-files-found: error
+          retention-days: 30
+  windows:
+    needs: reference
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tools -v
+      - run: python -m pip install pyinstaller==6.11.1
+      - name: Freeze updated local linker
+        shell: pwsh
+        run: |
+          python -m PyInstaller --clean --noconfirm --onedir --contents-directory _runtime-CelesteLinkFMOD --name CelesteLinkFMOD --distpath frozen tools/link_fmod_local.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & frozen/CelesteLinkFMOD/CelesteLinkFMOD.exe --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/download-artifact@v4
+        with:
+          name: public-system-import-reference
+          path: frozen/CelesteLinkFMOD/native
+      - run: python tools/verify_import_probe.py tools/fmod_system_imports.s frozen/CelesteLinkFMOD/native/FmodSystemImports.dylib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fmod-linker-repair
+          path: frozen/CelesteLinkFMOD/
+          if-no-files-found: error
+          retention-days: 30

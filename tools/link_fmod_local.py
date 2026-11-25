@@ -67,7 +67,18 @@ def write_stubs(imports, directory):
         result.append(path)
     return result
 
-def link_trial(reference, core, studio, output):
+def merge_observed_imports(reference, extra_references=()):
+    imports = observed_imports(reference)
+    seen = set().union(*imports.values())
+    for path in extra_references:
+        for library, symbols in observed_imports(path).items():
+            new = symbols - seen
+            if new:
+                imports.setdefault(library, set()).update(new)
+                seen.update(new)
+    return imports
+
+def link_trial(reference, core, studio, output, extra_references=()):
     output = output.resolve()
     if output.exists() or output.suffix != ".dylib":
         raise ValueError("Choose a new .dylib output path")
@@ -85,7 +96,7 @@ def link_trial(reference, core, studio, output):
             driver = [linker, "-flavor", "darwin"]
     if not driver:
         raise ValueError("Portable LLVM not found; run Setup-Toolchain.ps1")
-    imports = observed_imports(reference)
+    imports = merge_observed_imports(reference, extra_references)
     print("Observed", sum(map(len,imports.values())), "system imports across", len(imports), "libraries", flush=True)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output.parent) as tmp:
@@ -114,9 +125,11 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     for name in ("reference","core","studio","output"):
         p.add_argument(name,type=Path)
+    p.add_argument("--extra-reference", action="append", type=Path, default=[],
+                   help="A public tvOS import probe linked against the real system frameworks; repeatable")
     a = p.parse_args()
     try:
-        print("Experimental linked framework:", link_trial(a.reference,a.core,a.studio,a.output))
+        print("Experimental linked framework:", link_trial(a.reference,a.core,a.studio,a.output,a.extra_reference))
         print("Not device validated. Keep the output private.")
     except (OSError, ValueError, struct.error, subprocess.CalledProcessError) as e:
         p.exit(1, "FMOD local link trial: " + str(e) + "\n")

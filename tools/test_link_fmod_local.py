@@ -2,7 +2,8 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
-from link_fmod_local import observed_imports, write_stubs
+from link_fmod_local import observed_imports, write_stubs, merge_observed_imports
+from unittest.mock import patch
 
 class ImportStubTests(unittest.TestCase):
     def test_two_level_imports(self):
@@ -32,3 +33,13 @@ class ImportStubTests(unittest.TestCase):
             stubs = write_stubs(imports,root)
             self.assertEqual(len(stubs),2)
             self.assertTrue(all("arm64-tvos" in p.read_text() for p in stubs))
+
+    def test_extra_reference_preserves_known_provider(self):
+        with patch("link_fmod_local.observed_imports", side_effect=[
+            {"/usr/lib/libSystem.B.dylib": {"_puts"}},
+            {"/usr/lib/libSystem.B.dylib": {"_fprintf"},
+             "/usr/lib/libc++.1.dylib": {"_puts", "__ZdlPv"}},
+        ]):
+            merged = merge_observed_imports(Path("base"), [Path("extra")])
+        self.assertEqual(merged["/usr/lib/libSystem.B.dylib"], {"_puts", "_fprintf"})
+        self.assertEqual(merged["/usr/lib/libc++.1.dylib"], {"__ZdlPv"})

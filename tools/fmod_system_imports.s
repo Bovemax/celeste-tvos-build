@@ -1,0 +1,69 @@
+// Original link-only probe. Public system ABI symbol names, no implementations.
+// Never package or execute this probe on a device. Its symbol table is used
+// only to discover actual library install names via Apple's SDK linker.
+.section __DATA,__data
+.p2align 3
+.globl _CelestePublicImportProbe
+_CelestePublicImportProbe:
+    .quad _fputc
+    .quad _fprintf
+    .quad ___exp10f
+    .quad _sprintf
+    .quad ___sincosf_stret
+    .quad _strncpy
+    .quad ___cxa_guard_release
+    .quad ___cxa_guard_acquire
+    .quad _ldexpf
+    .quad _exp2f
+    .quad _sscanf
+    .quad _feof
+    .quad _fputs
+    .quad _usleep
+    .quad _pthread_setname_np
+    .quad _pthread_attr_destroy
+    .quad _pthread_attr_setschedparam
+    .quad _pthread_attr_setschedpolicy
+    .quad _semaphore_create
+    .quad _mach_task_self_
+    .quad _semaphore_destroy
+    .quad _semaphore_wait
+    .quad _semaphore_signal
+    .quad _AudioComponentInstanceDispose
+    .quad _AudioUnitUninitialize
+    .quad _AudioOutputUnitStart
+    .quad _AudioOutputUnitStop
+    .quad _AudioUnitGetProperty
+    .quad _AudioUnitInitialize
+    .quad _AudioUnitSetProperty
+    .quad _AudioComponentInstanceNew
+    .quad _AudioComponentFindNext
+    .quad _AudioUnitRender
+    .quad _frexp
+    .quad _setsockopt
+    .quad _fcntl
+    .quad _freeaddrinfo
+    .quad _close
+    .quad _getsockopt
+    .quad _select
+    .quad _connect
+    .quad _socket
+    .quad _getaddrinfo
+    .quad _listen
+    .quad _bind
+    .quad _accept
+    .quad _shutdown
+    .quad _send
+    .quad _recv
+    .quad _AudioQueueSetOfflineRenderFormat
+    .quad _AudioQueueAllocateBufferWithPacketDescriptions
+    .quad _AudioFileGetProperty
+    .quad _AudioFileGetPropertyInfo
+    .quad _AudioQueueOfflineRender
+    .quad _AudioQueueStop
+    .quad _AudioFileOpenWithCallbacks
+    .quad _AudioFileClose
+    .quad _AudioQueueFlush
+    .quad _AudioFileReadPacketData
+    .quad ___cxa_atexit
+    .quad __ZdlPv
+    .quad ___cxa_pure_virtual
