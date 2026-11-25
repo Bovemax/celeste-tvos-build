@@ -9,9 +9,19 @@ if (Test-Path (Join-Path $PSScriptRoot 'toolchain.py')) {
 $root = Join-Path $toolkit 'toolchain'
 New-Item -ItemType Directory -Force $root | Out-Null
 function Download-Checked($url, $file, $expected, $algorithm = 'SHA256') {
-    Invoke-WebRequest -Uri $url -OutFile $file -UseBasicParsing
-    if ((Get-FileHash $file -Algorithm $algorithm).Hash -ne $expected) {
-        throw "Checksum mismatch: $url"
+    if ((Test-Path -LiteralPath $file) -and ((Get-FileHash -LiteralPath $file -Algorithm $algorithm).Hash -eq $expected)) {
+        Write-Host "Reusing verified download: $file"
+        return
+    }
+    $partial = "$file.part"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $partial -UseBasicParsing
+        if ((Get-FileHash -LiteralPath $partial -Algorithm $algorithm).Hash -ne $expected) {
+            throw "Checksum mismatch: $url"
+        }
+        Move-Item -LiteralPath $partial -Destination $file -Force
+    } finally {
+        if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
     }
 }
 function Run-Checked($exe, [string[]]$arguments) {
@@ -88,17 +98,26 @@ try {
         $lld = Join-Path $llvm 'bin/lld.exe'
         $ld64 = Join-Path $llvm 'bin/ld64.lld.exe'
         if (-not (Test-Path $lld) -and -not (Test-Path $ld64)) {
-            # Official archive (large download); extract only bin and license files.
-            $archive = Join-Path $temp 'llvm.tar.xz'
+            # Download is retained after an extraction failure, unlike temporary files.
+            $extractor = Join-Path $toolkit 'CelesteExtractLLVM.exe'
+            if (-not (Test-Path -LiteralPath $extractor)) {
+                throw 'Missing CelesteExtractLLVM.exe; extract the toolchain repair ZIP into this folder first.'
+            }
+            $downloads = Join-Path $cache 'downloads'
+            New-Item -ItemType Directory -Force $downloads | Out-Null
+            $archive = Join-Path $downloads 'llvm-20.1.8-win64.tar.xz'
             Download-Checked 'https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.8/clang%2Bllvm-20.1.8-x86_64-pc-windows-msvc.tar.xz' $archive 'f229769f11d6a6edc8ada599c0cda964b7dee6ab1a08c6cf9dd7f513e85b107f'
+            $staging = Join-Path $temp 'llvm'
+            Run-Checked $extractor @($archive, $staging)
+            $stagedLd = Join-Path $staging 'bin/ld64.lld.exe'
+            $stagedLld = Join-Path $staging 'bin/lld.exe'
+            if (Test-Path $stagedLd) { Run-Checked $stagedLd @('--version') }
+            elseif (Test-Path $stagedLld) { Run-Checked $stagedLld @('-flavor','darwin','--version') }
+            else { throw 'Extracted archive lacks a usable Mach-O linker' }
             New-Item -ItemType Directory -Force $llvm | Out-Null
-            $members = @(tar.exe -tf $archive)
-            if ($LASTEXITCODE -ne 0) { throw 'Could not list LLVM archive' }
-            $selected = @($members | Where-Object { $_ -match '^[^/]+/bin/[^/]+\.(dll|exe)$' -and $_ -match '/(lld|ld64\.lld|[^/]+\.dll)(\.exe)?$' })
-            $selected += @($members | Where-Object { $_ -match '^[^/]+/(LICENSE[^/]*|share/doc/llvm/LICENSE[^/]*)$' })
-            if (-not $selected) { throw 'LLVM archive did not contain expected files' }
-            & tar.exe -xf $archive -C $llvm --strip-components 1 @selected
-            if ($LASTEXITCODE -ne 0) { throw 'LLVM extraction failed' }
+            Copy-Item -Path (Join-Path $staging '*') -Destination $llvm -Recurse -Force
+            # Keep the verified archive for retry/reinstall; it lives entirely in the toolkit cache.
+
         }
         if (Test-Path $ld64) { Run-Checked $ld64 @('--version') }
         elseif (Test-Path $lld) { Run-Checked $lld @('-flavor','darwin','--version') }

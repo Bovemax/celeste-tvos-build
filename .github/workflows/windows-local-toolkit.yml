@@ -45,8 +45,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m PyInstaller --clean --noconfirm --onedir --contents-directory _runtime-CelestePrepareInputs --name CelestePrepareInputs --distpath frozen tools/create_input_pack.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m PyInstaller --clean --noconfirm --onedir --contents-directory _runtime-CelesteExtractLLVM --name CelesteExtractLLVM --distpath frozen tools/extract_llvm.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force toolkit | Out-Null
-          foreach ($name in @("CelesteLocalBuild", "CelestePackage", "CelestePrepareInputs")) {
+          foreach ($name in @("CelesteLocalBuild", "CelestePackage", "CelestePrepareInputs", "CelesteExtractLLVM")) {
             Move-Item "frozen/$name/$name.exe" toolkit
             Move-Item "frozen/$name/_runtime-$name" toolkit
           }
@@ -56,18 +58,33 @@ jobs:
           Move-Item toolkit $relocated
           Push-Location $env:RUNNER_TEMP
           try {
-            foreach ($name in @("CelesteLocalBuild", "CelestePackage", "CelestePrepareInputs")) {
+            foreach ($name in @("CelesteLocalBuild", "CelestePackage", "CelestePrepareInputs", "CelesteExtractLLVM")) {
               & (Join-Path $relocated "$name.exe") --help
               if ($LASTEXITCODE -ne 0) { throw "$name failed from relocated directory" }
             }
           } finally { Pop-Location }
           Move-Item $relocated toolkit
+          # Run the frozen extractor against a real xz-compressed fixture.
+          python -c "import sys; sys.path.insert(0, 'tools'); from test_extract_llvm import fixture; fixture('llvm fixture.tar.xz')"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & toolkit/CelesteExtractLLVM.exe "llvm fixture.tar.xz" "extracted LLVM fixture"
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "extracted LLVM fixture/bin/lld.exe")) { throw "Frozen xz extraction failed" }
+          Copy-Item tools/Setup-Toolchain.ps1 toolkit/Setup-Toolchain.ps1
+          New-Item -ItemType Directory -Force repair | Out-Null
+          Copy-Item toolkit/Setup-Toolchain.ps1, toolkit/CelesteExtractLLVM.exe -Destination repair
+          Copy-Item toolkit/_runtime-CelesteExtractLLVM -Destination repair -Recurse
           & toolkit/CelestePrepareInputs.exe --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & toolkit/CelesteLocalBuild.exe --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & toolkit/CelestePackage.exe --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable-toolchain-repair
+          path: repair/
+          if-no-files-found: error
+          retention-days: 30
       - name: Find latest successful host
         id: host
         shell: pwsh

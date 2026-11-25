@@ -83,6 +83,11 @@ Use `-SkipLLVM` if you already have a compatible FMOD framework. LLVM is a
 large download. The compiler and linker prefer this local directory over PATH.
 These are downloaded locally rather than republished inside the public ZIP.
 Setup does not provide FMOD, Apple SDK files, or game files.
+LLVM extraction uses the packaged CelesteExtractLLVM.exe, not Windows tar.exe
+or a system xz installation. The verified LLVM archive is retained under
+toolchain/cache/downloads and reused if extraction needs to be retried.
+Existing toolkit users can overlay the portable-toolchain-repair artifact
+without deleting toolchain, inputs, work or other files.
 
 The packaged executables use only their portable toolchain, not system PATH.
 Keep the accompanying `_runtime-*` directories next to their executables.
