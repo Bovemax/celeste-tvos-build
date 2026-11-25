@@ -5,5 +5,5 @@
 <key>CFBundleVersion</key><string>1</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
 <key>UIDeviceFamily</key><array><integer>3</integer></array>
-<key>CelesteLocalPayloadVersion</key><integer>2</integer>
+<key>CelesteLocalPayloadVersion</key><integer>3</integer>
 </dict></plist>

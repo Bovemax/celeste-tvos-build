@@ -1,4 +1,4 @@
-"""Package local game files and native frameworks into a version 2 tvOS host.
+"""Package local game files and native frameworks into a version 3 tvOS host.
 
 All inputs remain local. Output is unsigned; packaging is not runtime validation.
 """
@@ -13,7 +13,7 @@ from link_native import verify_tvos_dylib
 
 FRAMEWORKS = ("CelesteNative", "FMODLocal")
 REQUIRED_STARTUP_ASSET = "Monocle/MonocleDefault.xnb"
-CONTENT_ROOTS = ("Content/", "GameAssemblies/Content/")
+CONTENT_ROOT = "Content/"
 
 def framework_info(name):
     return plistlib.dumps({
@@ -66,13 +66,15 @@ def package(host, managed, content, output, native, fmod=None, probe=False, prob
             with path.open("rb") as f:
                 if f.read(2) != b"MZ":
                     raise ValueError("Invalid PE assembly: " + name)
-            additions["GameAssemblies/" + name] = path
+            additions[name] = path
         files = sorted(p for p in content.rglob("*") if p.is_file())
         if not files:
             raise ValueError("Missing or empty Content")
         relative_names = {p.relative_to(content).as_posix() for p in files}
         if REQUIRED_STARTUP_ASSET not in relative_names:
             raise ValueError("Missing exact-case startup asset: " + REQUIRED_STARTUP_ASSET)
+        if not any(name.startswith("Tutorials/") for name in relative_names):
+            raise ValueError("Missing exact-case Tutorials content files")
         with (content / REQUIRED_STARTUP_ASSET).open("rb") as asset:
             if asset.read(3) != b"XNB":
                 raise ValueError("Invalid startup XNB header: " + REQUIRED_STARTUP_ASSET)
@@ -84,10 +86,7 @@ def package(host, managed, content, output, native, fmod=None, probe=False, prob
             folded.add(relative.casefold())
             if not p.resolve().is_relative_to(content):
                 raise ValueError("Content links outside source tree: " + str(p))
-            # FNA TitleContainer uses the app bundle root, while the v2 host
-            # and assembly-relative game paths use GameAssemblies. Keep both.
-            for prefix in CONTENT_ROOTS:
-                additions[prefix + relative] = p
+            additions[CONTENT_ROOT + relative] = p
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(host) as src:
@@ -102,15 +101,17 @@ def package(host, managed, content, output, native, fmod=None, probe=False, prob
             raise ValueError("Expected exactly one app")
         root = "Payload/" + roots.pop() + "/"
         metadata = plistlib.loads(src.read(root + "Info.plist"))
-        if 3 not in metadata.get("UIDeviceFamily", []) or metadata.get("CelesteLocalPayloadVersion") != 2:
-            raise ValueError("Expected version 2 tvOS game host")
+        version = metadata.get("CelesteLocalPayloadVersion")
+        # Allow older hosts for probe CI only; game packages require aligned roots.
+        if 3 not in metadata.get("UIDeviceFamily", []) or version not in ((2, 3) if probe else (3,)):
+            raise ValueError("Expected version 3 tvOS game host (version 2 allowed only for probes)")
         if root + metadata["CFBundleExecutable"] not in names:
             raise ValueError("Missing host executable")
         if any("/_CodeSignature/" in n or n.endswith("/embedded.mobileprovision") for n in names):
             raise ValueError("Host must be unsigned")
         if any(n.startswith(root + "GameAssemblies/") and not n.endswith("/") for n in names):
             raise ValueError("Host already contains a payload")
-        if not probe and any(n.startswith(root + "Content/") and not n.endswith("/") for n in names):
+        if any(n.startswith(root + "Content/") and not n.endswith("/") for n in names):
             raise ValueError("Host already contains root Content files")
         if any(root + name in names for name in additions):
             raise ValueError("Payload conflicts with an existing ZIP entry")
@@ -126,12 +127,14 @@ def package(host, managed, content, output, native, fmod=None, probe=False, prob
                 for name, path in additions.items():
                     dest.write(path, root + name)
                 if probe:
-                    for prefix in CONTENT_ROOTS:
-                        dest.writestr(root + prefix + "probe.txt", "Original FNA content probe")
+                    probe_root = "GameAssemblies/" if version == 2 else ""
+                    dest.writestr(root + probe_root + "Content/probe.txt", "Original FNA content probe")
+                    if version == 2:
+                        dest.writestr(root + "Content/probe.txt", "Original FNA content probe")
                     if probe_assembly is not None:
-                        dest.write(probe_assembly, root + "GameAssemblies/ExternalProbe.dll")
+                        dest.write(probe_assembly, root + probe_root + "ExternalProbe.dll")
                     if fmod_version is not None:
-                        dest.writestr(root + "GameAssemblies/fmod-version.txt", fmod_version)
+                        dest.writestr(root + probe_root + "fmod-version.txt", fmod_version)
                 for name, lib in frameworks.items():
                     prefix = root + "Frameworks/" + name + ".framework/"
                     info = zipfile.ZipInfo(prefix + name)
@@ -142,10 +145,12 @@ def package(host, managed, content, output, native, fmod=None, probe=False, prob
                     dest.writestr(prefix + "Info.plist", framework_info(name))
             with zipfile.ZipFile(target) as result:
                 if not probe:
-                    for relative in relative_names:
-                        first, second = (result.getinfo(root + prefix + relative) for prefix in CONTENT_ROOTS)
-                        if (first.file_size, first.CRC) != (second.file_size, second.CRC):
-                            raise ValueError("Content mirrors differ: " + relative)
+                    expected = {root + CONTENT_ROOT + name for name in relative_names}
+                    actual = {n for n in result.namelist() if n.startswith(root + CONTENT_ROOT) and not n.endswith("/")}
+                    if actual != expected:
+                        raise ValueError("Root content inventory differs from local inputs")
+                    if any(n.startswith(root + "GameAssemblies/Content/") and not n.endswith("/") for n in result.namelist()):
+                        raise ValueError("Duplicate content tree in version 3 package")
                 if result.testzip() is not None:
                     raise ValueError("Archive integrity check failed")
             with output.open("xb") as out, target.open("rb") as inp:

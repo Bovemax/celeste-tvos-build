@@ -29,6 +29,8 @@ class GamePackageTests(unittest.TestCase):
         (self.content / "example.txt").write_bytes(b"fixture")
         (self.content / "Monocle").mkdir()
         (self.content / "Monocle/MonocleDefault.xnb").write_bytes(b"XNBfixture")
+        (self.content / "Tutorials").mkdir()
+        (self.content / "Tutorials/sample.bin").write_bytes(b"fixture")
         self.native = self.root / "CelesteNative.dylib"
         self.fmod = self.root / "FMODLocal.dylib"
         synthetic_dylib(self.native, "CelesteNative")
@@ -36,7 +38,7 @@ class GamePackageTests(unittest.TestCase):
         self.prefix = "Payload/Host.app/"
         self.output = self.root / "output.ipa"
 
-    def make_host(self, version=2):
+    def make_host(self, version=3):
         with zipfile.ZipFile(self.host, "w") as z:
             z.writestr(self.prefix + "Info.plist", plistlib.dumps({
                 "UIDeviceFamily": [3], "CFBundleExecutable": "Host",
@@ -50,11 +52,12 @@ class GamePackageTests(unittest.TestCase):
         self.make_host()
         package(self.host, self.managed, self.content, self.output, self.native, self.fmod)
         with zipfile.ZipFile(self.output) as z:
-            self.assertEqual(z.read(self.prefix + "GameAssemblies/Celeste.dll"), b"MZfixture")
-            self.assertEqual(z.read(self.prefix + "GameAssemblies/Content/example.txt"), b"fixture")
+            self.assertEqual(z.read(self.prefix + "Celeste.dll"), b"MZfixture")
+            self.assertEqual(z.read(self.prefix + "Celeste.Content.dll"), b"MZfixture")
             self.assertEqual(z.read(self.prefix + "Content/example.txt"), b"fixture")
-            for prefix in ("Content/", "GameAssemblies/Content/"):
-                self.assertEqual(z.read(self.prefix + prefix + "Monocle/MonocleDefault.xnb"), b"XNBfixture")
+            self.assertEqual(z.read(self.prefix + "Content/Monocle/MonocleDefault.xnb"), b"XNBfixture")
+            self.assertEqual(z.read(self.prefix + "Content/Tutorials/sample.bin"), b"fixture")
+            self.assertFalse(any(n.startswith(self.prefix + "GameAssemblies/") for n in z.namelist()))
             for name in ("CelesteNative", "FMODLocal"):
                 p = self.prefix + "Frameworks/" + name + ".framework/"
                 self.assertEqual(z.getinfo(p + name).external_attr >> 16, 0o100755)
@@ -68,9 +71,9 @@ class GamePackageTests(unittest.TestCase):
         self.make_host()
         package(self.host, None, None, self.output, self.native, probe=True)
         with zipfile.ZipFile(self.output) as z:
-            self.assertIn(self.prefix + "GameAssemblies/Content/probe.txt", z.namelist())
+            self.assertNotIn(self.prefix + "GameAssemblies/Content/probe.txt", z.namelist())
             self.assertIn(self.prefix + "Content/probe.txt", z.namelist())
-            self.assertNotIn(self.prefix + "GameAssemblies/Celeste.dll", z.namelist())
+            self.assertNotIn(self.prefix + "Celeste.dll", z.namelist())
 
     def test_external_probe_with_optional_fmod(self):
         self.make_host()
@@ -79,9 +82,9 @@ class GamePackageTests(unittest.TestCase):
         package(self.host, None, None, self.output, self.native, self.fmod,
                 probe=True, probe_assembly=assembly, fmod_version="0x00020200")
         with zipfile.ZipFile(self.output) as z:
-            self.assertEqual(z.read(self.prefix + "GameAssemblies/ExternalProbe.dll"), b"MZexternal")
-            self.assertEqual(z.read(self.prefix + "GameAssemblies/fmod-version.txt"), b"00020200")
-            self.assertNotIn(self.prefix + "GameAssemblies/Celeste.dll", z.namelist())
+            self.assertEqual(z.read(self.prefix + "ExternalProbe.dll"), b"MZexternal")
+            self.assertEqual(z.read(self.prefix + "fmod-version.txt"), b"00020200")
+            self.assertNotIn(self.prefix + "Celeste.dll", z.namelist())
 
     def test_invalid_host_and_platform(self):
         self.make_host(1)
@@ -106,6 +109,21 @@ class GamePackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid startup XNB header"):
             package(self.host, self.managed, self.content, self.output, self.native, self.fmod)
         self.assertFalse(self.output.exists())
+
+    def test_missing_tutorials(self):
+        self.make_host()
+        (self.content / "Tutorials/sample.bin").unlink()
+        with self.assertRaisesRegex(ValueError, "Missing exact-case Tutorials"):
+            package(self.host, self.managed, self.content, self.output, self.native, self.fmod)
+        self.assertFalse(self.output.exists())
+
+    def test_v2_game_rejected_but_probe_supported(self):
+        self.make_host(2)
+        with self.assertRaisesRegex(ValueError, "Expected version 3"):
+            package(self.host, self.managed, self.content, self.output, self.native, self.fmod)
+        package(self.host, None, None, self.output, self.native, probe=True)
+        with zipfile.ZipFile(self.output) as z:
+            self.assertIn(self.prefix + "GameAssemblies/Content/probe.txt", z.namelist())
 
     def test_missing_fmod(self):
         self.make_host()

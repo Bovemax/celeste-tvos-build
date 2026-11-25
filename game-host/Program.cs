@@ -14,7 +14,7 @@ namespace LocalGameHost;
 internal static class Program
 {
     private static readonly string Bundle = NSBundle.MainBundle.BundlePath;
-    private static readonly string Payload = Path.Combine(Bundle, "GameAssemblies");
+    private static readonly string Payload = Bundle; // One root for FNA and assembly-relative content.
     private static IntPtr nativeHandle, fmodHandle;
     private static string startupError = "";
     private static string stage = "Host setup";
@@ -145,8 +145,11 @@ internal static class Program
         stage = "Verify packaged game files";
         if (!File.Exists(Path.Combine(Payload, "Celeste.Content.dll")))
             throw new FileNotFoundException("Missing Celeste.Content.dll");
-        if (!Directory.Exists(Path.Combine(Payload, "Content")))
-            throw new DirectoryNotFoundException("Missing game content");
+        var content = Path.Combine(Payload, "Content");
+        if (!File.Exists(Path.Combine(content, "Monocle", "MonocleDefault.xnb")))
+            throw new FileNotFoundException("Missing startup XNB at bundle root");
+        if (!Directory.Exists(Path.Combine(content, "Tutorials")))
+            throw new DirectoryNotFoundException("Missing Tutorials at bundle root");
         // Explicit load context preserves assembly Location for the game's
         // assembly-relative asset lookup. No downloading or remote code loading.
         AssemblyLoadContext.Default.Resolving += (context, name) =>
@@ -217,7 +220,7 @@ internal static class Program
             controller.View.AddSubview(new UILabel(new CoreGraphics.CGRect(
                 70, 60, bounds.Width - 140, bounds.Height - 120))
             {
-                Text = message.Length > 2200 ? message[..2200] : message,
+                Text = message.Length > 2200 ? message[..1100] + "\n...\n" + message[^1050..] : message,
                 Lines = 0,
                 Font = UIFont.SystemFontOfSize(25),
                 AdjustsFontSizeToFitWidth = true,

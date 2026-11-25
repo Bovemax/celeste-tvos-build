@@ -20,9 +20,14 @@ internal static class ExternalProbe
         }
         Test(1, () => new Vector2(3, 4).Length() == 5);
         Test(2, () => SDL_WasInit(0) != 0);
-        Test(4, () => File.ReadAllText(Path.Combine(
-            Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!,
-            "Content", "probe.txt")) == "Original FNA content probe");
+        Test(4, () => {
+            var local = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!,
+                "Content", "probe.txt");
+            if (File.ReadAllText(local) != "Original FNA content probe") return false;
+            using var stream = TitleContainer.OpenStream("Content/probe.txt");
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd() == "Original FNA content probe";
+        });
         Test(8, () => {
             var marker = Path.Combine(Directory.GetCurrentDirectory(), "external-probe.txt");
             File.WriteAllText(marker, "external assembly write");

@@ -30,7 +30,7 @@ internal sealed class FnaProbe : Game
 
     protected override void LoadContent()
     {
-        var probe = Path.Combine(NSBundle.MainBundle.BundlePath, "GameAssemblies", "ExternalProbe.dll");
+        var probe = Path.Combine(NSBundle.MainBundle.BundlePath, "ExternalProbe.dll");
         if (File.Exists(probe))
         {
             try { external = (int)(Program.InvokePayload("ExternalProbe.dll") ?? -1); }
@@ -52,7 +52,7 @@ internal sealed class FnaProbe : Game
         }
         try { tone = new SoundEffect(pcm, 44100, AudioChannels.Mono); audio = 1; }
         catch (Exception e) { Console.Error.WriteLine("FAudio: " + e); }
-        var path = Path.Combine(NSBundle.MainBundle.BundlePath, "GameAssemblies", "Content", "probe.txt");
+        var path = Path.Combine(NSBundle.MainBundle.BundlePath, "Content", "probe.txt");
         Console.WriteLine("Content fixture present: " + File.Exists(path));
         base.LoadContent();
     }

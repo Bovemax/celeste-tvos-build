@@ -44,7 +44,7 @@ internal static class FmodProbe
                     NativeLibrary.GetExport(handle, symbol);
             }
             finally { NativeLibrary.Free(handle); }
-            var versionPath = Path.Combine(bundle, "GameAssemblies", "fmod-version.txt");
+            var versionPath = Path.Combine(bundle, "fmod-version.txt");
             if (!File.Exists(versionPath)) return 1;
             uint version = uint.Parse(File.ReadAllText(versionPath).Trim(), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
             Check(FMOD_Studio_System_Create(out system, version), "Studio create");

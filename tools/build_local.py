@@ -1,6 +1,6 @@
 """Orchestrate the experimental Windows-only Celeste preparation and packaging.
 
-Uses user-owned local inputs and a prebuilt version 2 game host. Nothing is
+Uses user-owned local inputs and a prebuilt version 3 game host. Nothing is
 uploaded. FMOD integration and device execution are not yet verified.
 """
 import argparse
