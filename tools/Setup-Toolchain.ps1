@@ -97,7 +97,8 @@ try {
         $llvm = Join-Path $root 'llvm'
         $lld = Join-Path $llvm 'bin/lld.exe'
         $ld64 = Join-Path $llvm 'bin/ld64.lld.exe'
-        if (-not (Test-Path $lld) -and -not (Test-Path $ld64)) {
+        $nm = Join-Path $llvm 'bin/llvm-nm.exe'
+        if ((-not (Test-Path $lld) -and -not (Test-Path $ld64)) -or -not (Test-Path $nm)) {
             # Download is retained after an extraction failure, unlike temporary files.
             $extractor = Join-Path $toolkit 'CelesteExtractLLVM.exe'
             if (-not (Test-Path -LiteralPath $extractor)) {
@@ -114,6 +115,9 @@ try {
             if (Test-Path $stagedLd) { Run-Checked $stagedLd @('--version') }
             elseif (Test-Path $stagedLld) { Run-Checked $stagedLld @('-flavor','darwin','--version') }
             else { throw 'Extracted archive lacks a usable Mach-O linker' }
+            $stagedNm = Join-Path $staging 'bin/llvm-nm.exe'
+            if (-not (Test-Path $stagedNm)) { throw 'LLVM extraction lacks llvm-nm.exe; use the updated CelesteExtractLLVM.exe' }
+            Run-Checked $stagedNm @('--version')
             New-Item -ItemType Directory -Force $llvm | Out-Null
             Copy-Item -Path (Join-Path $staging '*') -Destination $llvm -Recurse -Force
             # Keep the verified archive for retry/reinstall; it lives entirely in the toolkit cache.
@@ -122,6 +126,7 @@ try {
         if (Test-Path $ld64) { Run-Checked $ld64 @('--version') }
         elseif (Test-Path $lld) { Run-Checked $lld @('-flavor','darwin','--version') }
         else { throw 'LLVM archive lacks a usable Mach-O linker' }
+        Run-Checked $nm @('--version')
     }
     Write-Host 'Portable toolchain ready. No system PATH changes.'
 }

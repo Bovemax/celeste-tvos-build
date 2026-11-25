@@ -10,6 +10,7 @@ def fixture(path):
         for name, payload in [
             ("llvm/bin/lld.exe", b"synthetic linker"),
             ("llvm/bin/libLLVM.dll", b"synthetic library"),
+            ("llvm/bin/llvm-nm.exe", b"synthetic symbol reader"),
             ("llvm/LICENSE.TXT", b"license"),
             ("llvm/bin/clang.exe", b"not needed"),
             ("llvm/../../outside.txt", b"not allowed"),
@@ -32,6 +33,7 @@ class ExtractTests(unittest.TestCase):
             self.assertEqual((output / "bin/lld.exe").read_bytes(), b"synthetic linker")
             self.assertEqual((output / "bin/ld64.lld.exe").read_bytes(), b"synthetic linker")
             self.assertEqual((output / "bin/libLLVM.dll").read_bytes(), b"synthetic library")
+            self.assertEqual((output / "bin/llvm-nm.exe").read_bytes(), b"synthetic symbol reader")
             self.assertTrue((output / "LICENSE.TXT").exists())
             self.assertFalse((output / "bin/clang.exe").exists())
             self.assertFalse((root / "outside.txt").exists())

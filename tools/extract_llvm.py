@@ -20,7 +20,7 @@ def extract(archive, output):
             relative = parts[1:]
             name = relative[-1].lower()
             if len(relative) == 2 and relative[0] == "bin":
-                wanted = name in ("lld.exe", "ld64.lld.exe") or name.endswith(".dll")
+                wanted = name in ("lld.exe", "ld64.lld.exe", "llvm-nm.exe") or name.endswith(".dll")
             else:
                 wanted = (len(relative) == 1 or relative[:-1] == ("share", "doc", "llvm")) and name.startswith("license")
             if wanted and (member.isfile() or member.islnk() or member.issym()):
