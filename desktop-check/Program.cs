@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Runtime.Loader;
 
@@ -20,6 +21,22 @@ try
         throw new DirectoryNotFoundException("Content missing or empty");
     Log("Desktop CLR: " + RuntimeInformation.FrameworkDescription);
     Log("Content: " + Directory.EnumerateFiles(content, "*", SearchOption.AllDirectories).Count() + " files");
+    Log("Process architecture: " + RuntimeInformation.ProcessArchitecture);
+    foreach (var name in new[] {"Celeste.dll", "Celeste.Content.dll"})
+    {
+        using var stream = File.OpenRead(Path.Combine(managed, name));
+        using var pe = new PEReader(stream);
+        var header = pe.PEHeaders.CorHeader;
+        if (header == null || !pe.HasMetadata)
+            throw new BadImageFormatException(name + ": not a managed PE assembly");
+        Log(name + ": machine=" + pe.PEHeaders.CoffHeader.Machine +
+            ", CLR flags=" + header.Flags + " (0x" + ((uint)header.Flags).ToString("X8") + ")");
+        if ((header.Flags & CorFlags.ILOnly) == 0 ||
+            (header.Flags & CorFlags.Requires32Bit) != 0 ||
+            (header.Flags & CorFlags.Prefers32Bit) != 0 ||
+            pe.PEHeaders.CoffHeader.Machine != Machine.I386)
+            Log("  WARNING: not an architecture-neutral AnyCPU IL assembly; check portability to tvOS ARM64.");
+    }
     var context = AssemblyLoadContext.Default;
     var fna = context.LoadFromAssemblyPath(fnaPath);
     Log("Pinned FNA: " + fna.FullName);
