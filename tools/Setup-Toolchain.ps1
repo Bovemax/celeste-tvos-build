@@ -125,4 +125,21 @@ try {
     }
     Write-Host 'Portable toolchain ready. No system PATH changes.'
 }
-finally { Remove-Item -Recurse -Force $temp }
+finally {
+    # Windows can briefly retain a handle to an executed linker (or scan it).
+    # A cleanup-only failure must not mask setup errors or mark valid tools failed.
+    for ($attempt = 0; $attempt -lt 4; $attempt++) {
+        try {
+            if (Test-Path -LiteralPath $temp) {
+                Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction Stop
+            }
+            break
+        } catch {
+            if ($attempt -eq 3) {
+                Write-Warning "Temporary files remain in $temp. Delete this folder after closing the tools; installed tools and verified downloads are unaffected."
+            } else {
+                Start-Sleep -Milliseconds (250 * ($attempt + 1))
+            }
+        }
+    }
+}
