@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import hashlib
+import xml.etree.ElementTree as ET
 from toolchain import environment, find
 
 def run(args, cwd=None, check=True, capture=False):
@@ -41,6 +42,36 @@ def apply_patch(source, patch):
         print("Already applied:", patch.name, flush=True)
         return
     run(["git", "-c", "core.autocrlf=false", "apply", "--ignore-space-change", "--check", patch], source)
+
+def remove_steam_reference(source, patch):
+    # Recognize only the standard reference-removal patch, not arbitrary user edits.
+    lines = patch.read_text(encoding="utf-8-sig").splitlines()
+    headers = [line for line in lines if line.startswith("diff --git ")]
+    removed = [line[1:].strip() for line in lines if line.startswith("-") and not line.startswith("---")]
+    added = [line for line in lines if line.startswith("+") and not line.startswith("+++")]
+    if (headers != ["diff --git a/Celeste.csproj b/Celeste.csproj"] or added or
+            len(removed) != 3 or removed[0] != '<Reference Include="Steamworks.NET">' or
+            not removed[1].startswith("<HintPath>") or
+            not removed[1].endswith("Steamworks.NET.dll</HintPath>") or removed[2] != "</Reference>"):
+        return False
+    project = source / "Celeste.csproj"
+    tree = ET.parse(project, parser=ET.XMLParser(target=ET.TreeBuilder(insert_comments=True)))
+    root = tree.getroot()
+    namespace = root.tag.partition("}")[0] + "}" if root.tag.startswith("{") else ""
+    if root.tag != namespace + "Project":
+        raise ValueError("Expected an MSBuild project")
+    if namespace:
+        ET.register_namespace("", namespace[1:-1])
+    count = 0
+    for group in root.iter(namespace + "ItemGroup"):
+        for ref in list(group):
+            if ref.tag == namespace + "Reference" and ref.get("Include", "").split(",")[0].strip().casefold() == "steamworks.net":
+                group.remove(ref)
+                count += 1
+    if count:
+        tree.write(project, encoding="utf-8", xml_declaration=True)
+    print("Removed Steamworks project reference:" if count else "Steamworks project reference already absent:", project, flush=True)
+    return True
 
 def build(staged, patches, output):
     staged, patches, output = (p.resolve() for p in (staged, patches, output))
@@ -78,6 +109,8 @@ def build(staged, patches, output):
         patch = local_patches / name
         shutil.copy2(patches / name, patch)
         normalize_lf(patch)
+        if name == "remove-steam2.patch" and remove_steam_reference(source, patch):
+            continue
         apply_patch(source, patch)
     projects = list(source.glob("*.csproj")) + list(source.glob("*/*.csproj"))
     if len(projects) != 1:
