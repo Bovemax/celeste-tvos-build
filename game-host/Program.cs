@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Loader;
+using System.Security.Cryptography;
 using Foundation;
 using UIKit;
 using GameController;
@@ -19,6 +20,8 @@ internal static class Program
     private static string startupError = "";
     private static string stage = "Host setup";
     private static UIWindow? diagnosticWindow;
+    private static string? gameLogPath, initialLogDigest;
+    private static bool logBaselineKnown;
     private static readonly SdlMain Callback = Run;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -31,6 +34,13 @@ internal static class Program
     private static extern int SDL_SetHint(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string value);
+
+    [DllImport("SDL2", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_GetPrefPath(
+        IntPtr organization, [MarshalAs(UnmanagedType.LPUTF8Str)] string application);
+
+    [DllImport("SDL2", CallingConvention = CallingConvention.Cdecl)]
+    private static extern void SDL_free(IntPtr memory);
 
     private static string Framework(string name) =>
         Path.Combine(Bundle, "Frameworks", name + ".framework", name);
@@ -117,8 +127,9 @@ internal static class Program
                 RunProbe();
             else
             {
+                CaptureGameLogBaseline();
                 RunGame();
-                ShowDiagnostic("Game entry point returned without an active game loop.", null);
+                ShowDiagnostic("Game entry point returned.", null);
             }
             return 0;
         }
@@ -186,6 +197,50 @@ internal static class Program
             throw new NotSupportedException("Unexpected game entry point signature");
     }
 
+    // Match the game's tvOS log location through the same SDL API, without
+    // moving, deleting, or rewriting its existing logs or saves.
+    private static void CaptureGameLogBaseline()
+    {
+        try
+        {
+            var ptr = SDL_GetPrefPath(IntPtr.Zero, "Celeste");
+            if (ptr == IntPtr.Zero) throw new IOException("SDL_GetPrefPath returned null");
+            string? directory;
+            try { directory = Marshal.PtrToStringUTF8(ptr); }
+            finally { SDL_free(ptr); }
+            if (string.IsNullOrEmpty(directory)) throw new IOException("SDL preference path is empty");
+            gameLogPath = Path.Combine(directory, "errorLog.txt");
+            initialLogDigest = LogDigest(gameLogPath);
+            logBaselineKnown = true;
+        }
+        catch (Exception e) { Console.Error.WriteLine("Log baseline unavailable: " + e.Message); }
+    }
+
+    private static string? LogDigest(string path)
+    {
+        if (!File.Exists(path)) return null;
+        using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        return Convert.ToHexString(SHA256.HashData(stream));
+    }
+
+    private static string ReadGameLogDiagnostic()
+    {
+        if (gameLogPath == null) return "\nGame log location unavailable.";
+        try
+        {
+            var digest = LogDigest(gameLogPath);
+            if (digest == null) return "\nNo game error log found at SDL preference path.";
+            if (logBaselineKnown && digest == initialLogDigest)
+                return "\nGame error log unchanged since launch (not a new error).";
+            using var reader = new StreamReader(File.Open(gameLogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite));
+            var buffer = new char[3500];
+            int count = reader.ReadBlock(buffer, 0, buffer.Length);
+            return (logBaselineKnown ? "\nNew game error log:\n" : "\nGame error log (freshness unknown):\n")
+                + new string(buffer, 0, count);
+        }
+        catch (Exception e) { return "\nCould not read game error log: " + e.Message; }
+    }
+
     private static void ShowDiagnostic(string summary, Exception? error)
     {
         // SDL's UIKit delegate continues the event loop after its main callback
@@ -194,20 +249,7 @@ internal static class Program
         var detail = error?.ToString() ?? "";
         if (error is TargetInvocationException && error.InnerException != null)
             detail = error.InnerException.ToString();
-        try
-        {
-            foreach (var name in new[] { "error_log.txt", "ErrorLog.txt", "errorlog.txt" })
-            {
-                var path = Path.Combine(Directory.GetCurrentDirectory(), name);
-                if (!File.Exists(path)) continue;
-                using var reader = new StreamReader(path);
-                var buffer = new char[1800];
-                int count = reader.ReadBlock(buffer, 0, buffer.Length);
-                detail += "\nGame log: " + new string(buffer, 0, count);
-                break;
-            }
-        }
-        catch (Exception logError) { Console.Error.WriteLine(logError); }
+        detail += ReadGameLogDiagnostic();
         var message = summary + "\nStage: " + stage + "\n" + detail;
         Console.Error.WriteLine(message);
         try
