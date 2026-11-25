@@ -11,6 +11,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <!-- The game is supplied after publishing: retain its entire public FNA dependency. -->
+    <TrimmerRootAssembly Include="FNA" RootMode="All" />
     <Reference Include="FNA">
       <HintPath>../deps/FNA.dll</HintPath>
       <Private>true</Private>

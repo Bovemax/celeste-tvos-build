@@ -40,12 +40,6 @@ jobs:
           dotnet publish desktop-check/DesktopCheck.csproj -c Release -o desktop-check-out -p:UseAppHost=false
           cp deps/FNA.dll desktop-check-out/FNA.dll
           cp upstream-fna/licenses/LICENSE desktop-check-out/FNA-LICENSE.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: desktop-managed-check
-          path: desktop-check-out/
-          if-no-files-found: error
-          retention-days: 30
       - name: Install tvOS workload
         run: dotnet workload install tvos
       - name: Publish unsigned interpreter host
@@ -55,6 +49,10 @@ jobs:
           APP=$(find game-host/bin -name '*.app' -type d -print -quit)
           test -n "$APP"
           /usr/libexec/PlistBuddy -c 'Print :CelesteLocalPayloadVersion' "$APP/Info.plist" | grep -x 2
+          BUNDLED_FNA=$(find "$APP" -name FNA.dll -type f -print -quit)
+          test -n "$BUNDLED_FNA"
+          DOTNET_ROLL_FORWARD=Major dotnet desktop-check-out/DesktopCheck.dll --verify-fna deps/FNA.dll "$BUNDLED_FNA"
+          cp "$BUNDLED_FNA" desktop-check-out/FNA.dll
           mkdir -p out/Payload
           cp probe-payload/bin/Release/net10.0/ExternalProbe.dll out/ExternalProbe.dll
           ditto "$APP" out/Payload/GameHost.app
@@ -68,6 +66,12 @@ jobs:
             printf '\n--- %s ---\n' "$(basename "$notice")" >> out/FNA-LICENSE.txt
             cat "$notice" >> out/FNA-LICENSE.txt
           done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-managed-check
+          path: desktop-check-out/
+          if-no-files-found: error
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         with:
           name: fna-game-host-base-unsigned
