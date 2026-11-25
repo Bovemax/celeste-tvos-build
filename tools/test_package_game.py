@@ -27,6 +27,8 @@ class GamePackageTests(unittest.TestCase):
         for name in ("Celeste.dll", "Celeste.Content.dll"):
             (self.managed / name).write_bytes(b"MZfixture")
         (self.content / "example.txt").write_bytes(b"fixture")
+        (self.content / "Monocle").mkdir()
+        (self.content / "Monocle/MonocleDefault.xnb").write_bytes(b"XNBfixture")
         self.native = self.root / "CelesteNative.dylib"
         self.fmod = self.root / "FMODLocal.dylib"
         synthetic_dylib(self.native, "CelesteNative")
@@ -50,6 +52,9 @@ class GamePackageTests(unittest.TestCase):
         with zipfile.ZipFile(self.output) as z:
             self.assertEqual(z.read(self.prefix + "GameAssemblies/Celeste.dll"), b"MZfixture")
             self.assertEqual(z.read(self.prefix + "GameAssemblies/Content/example.txt"), b"fixture")
+            self.assertEqual(z.read(self.prefix + "Content/example.txt"), b"fixture")
+            for prefix in ("Content/", "GameAssemblies/Content/"):
+                self.assertEqual(z.read(self.prefix + prefix + "Monocle/MonocleDefault.xnb"), b"XNBfixture")
             for name in ("CelesteNative", "FMODLocal"):
                 p = self.prefix + "Frameworks/" + name + ".framework/"
                 self.assertEqual(z.getinfo(p + name).external_attr >> 16, 0o100755)
@@ -64,6 +69,7 @@ class GamePackageTests(unittest.TestCase):
         package(self.host, None, None, self.output, self.native, probe=True)
         with zipfile.ZipFile(self.output) as z:
             self.assertIn(self.prefix + "GameAssemblies/Content/probe.txt", z.namelist())
+            self.assertIn(self.prefix + "Content/probe.txt", z.namelist())
             self.assertNotIn(self.prefix + "GameAssemblies/Celeste.dll", z.namelist())
 
     def test_external_probe_with_optional_fmod(self):
@@ -85,6 +91,20 @@ class GamePackageTests(unittest.TestCase):
         synthetic_dylib(self.native, "CelesteNative", platform=8)
         with self.assertRaises(ValueError):
             package(self.host, None, None, self.output, self.native, probe=True)
+        self.assertFalse(self.output.exists())
+
+    def test_missing_startup_asset(self):
+        self.make_host()
+        (self.content / "Monocle/MonocleDefault.xnb").unlink()
+        with self.assertRaisesRegex(ValueError, "Missing exact-case startup asset"):
+            package(self.host, self.managed, self.content, self.output, self.native, self.fmod)
+        self.assertFalse(self.output.exists())
+
+    def test_invalid_startup_asset_header(self):
+        self.make_host()
+        (self.content / "Monocle/MonocleDefault.xnb").write_bytes(b"bad")
+        with self.assertRaisesRegex(ValueError, "Invalid startup XNB header"):
+            package(self.host, self.managed, self.content, self.output, self.native, self.fmod)
         self.assertFalse(self.output.exists())
 
     def test_missing_fmod(self):

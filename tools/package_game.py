@@ -12,6 +12,8 @@ import zipfile
 from link_native import verify_tvos_dylib
 
 FRAMEWORKS = ("CelesteNative", "FMODLocal")
+REQUIRED_STARTUP_ASSET = "Monocle/MonocleDefault.xnb"
+CONTENT_ROOTS = ("Content/", "GameAssemblies/Content/")
 
 def framework_info(name):
     return plistlib.dumps({
@@ -68,10 +70,24 @@ def package(host, managed, content, output, native, fmod=None, probe=False, prob
         files = sorted(p for p in content.rglob("*") if p.is_file())
         if not files:
             raise ValueError("Missing or empty Content")
+        relative_names = {p.relative_to(content).as_posix() for p in files}
+        if REQUIRED_STARTUP_ASSET not in relative_names:
+            raise ValueError("Missing exact-case startup asset: " + REQUIRED_STARTUP_ASSET)
+        with (content / REQUIRED_STARTUP_ASSET).open("rb") as asset:
+            if asset.read(3) != b"XNB":
+                raise ValueError("Invalid startup XNB header: " + REQUIRED_STARTUP_ASSET)
+        folded = set()
         for p in files:
+            relative = p.relative_to(content).as_posix()
+            if relative.casefold() in folded:
+                raise ValueError("Case-colliding Content paths: " + relative)
+            folded.add(relative.casefold())
             if not p.resolve().is_relative_to(content):
                 raise ValueError("Content links outside source tree: " + str(p))
-            additions["GameAssemblies/Content/" + p.relative_to(content).as_posix()] = p
+            # FNA TitleContainer uses the app bundle root, while the v2 host
+            # and assembly-relative game paths use GameAssemblies. Keep both.
+            for prefix in CONTENT_ROOTS:
+                additions[prefix + relative] = p
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(host) as src:
@@ -94,6 +110,10 @@ def package(host, managed, content, output, native, fmod=None, probe=False, prob
             raise ValueError("Host must be unsigned")
         if any(n.startswith(root + "GameAssemblies/") and not n.endswith("/") for n in names):
             raise ValueError("Host already contains a payload")
+        if not probe and any(n.startswith(root + "Content/") and not n.endswith("/") for n in names):
+            raise ValueError("Host already contains root Content files")
+        if any(root + name in names for name in additions):
+            raise ValueError("Payload conflicts with an existing ZIP entry")
         for name in frameworks:
             if any(n.startswith(root + "Frameworks/" + name + ".framework/") for n in names):
                 raise ValueError("Host already contains framework " + name)
@@ -106,7 +126,8 @@ def package(host, managed, content, output, native, fmod=None, probe=False, prob
                 for name, path in additions.items():
                     dest.write(path, root + name)
                 if probe:
-                    dest.writestr(root + "GameAssemblies/Content/probe.txt", "Original FNA content probe")
+                    for prefix in CONTENT_ROOTS:
+                        dest.writestr(root + prefix + "probe.txt", "Original FNA content probe")
                     if probe_assembly is not None:
                         dest.write(probe_assembly, root + "GameAssemblies/ExternalProbe.dll")
                     if fmod_version is not None:
@@ -120,6 +141,11 @@ def package(host, managed, content, output, native, fmod=None, probe=False, prob
                         shutil.copyfileobj(inp, out)
                     dest.writestr(prefix + "Info.plist", framework_info(name))
             with zipfile.ZipFile(target) as result:
+                if not probe:
+                    for relative in relative_names:
+                        first, second = (result.getinfo(root + prefix + relative) for prefix in CONTENT_ROOTS)
+                        if (first.file_size, first.CRC) != (second.file_size, second.CRC):
+                            raise ValueError("Content mirrors differ: " + relative)
                 if result.testzip() is not None:
                     raise ValueError("Archive integrity check failed")
             with output.open("xb") as out, target.open("rb") as inp:

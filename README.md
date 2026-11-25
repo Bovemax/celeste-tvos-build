@@ -148,3 +148,7 @@ Signing, runtime assembly loading, game startup, graphics, controller, FMOD
 audio, content and durable game saves still require real device evidence.
 The current host uses writable caches for transient files, which tvOS may purge.
 A successful package does not promise successful installation or play.
+
+### tvOS content layout (v2 host)
+
+Game packaging mirrors local Content at both `GameHost.app/Content/` (FNA TitleContainer) and `GameHost.app/GameAssemblies/Content/` (assembly-relative game content). Both copies are required for compatibility with the current host; the packager validates the exact-case startup XNB path and mirror CRCs. This adds package size but avoids symlinks and host rebuilds. No content is uploaded. Device execution and XNB decoding remain separate tests.
