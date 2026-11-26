@@ -10,7 +10,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: fna-game-host
+  group: fna-game-host-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   host:
@@ -21,6 +21,11 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Verify isolated app identity before building host
+        run: |
+          DOTNET_ROLL_FORWARD=Major dotnet run --project desktop-check/DesktopCheck.csproj -c Release -- --verify-test-identity
+      - name: Verify save snapshot and recovery policy
+        run: dotnet run --project save-protection/SaveProtection.csproj -c Release
       - name: Build pinned public managed FNA
         run: |
           set -euo pipefail
@@ -49,6 +54,7 @@ jobs:
           APP=$(find game-host/bin -name '*.app' -type d -print -quit)
           test -n "$APP"
           /usr/libexec/PlistBuddy -c 'Print :CelesteLocalPayloadVersion' "$APP/Info.plist" | grep -x 3
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist" | grep -x 'org.example.celestelocalhost.runtimetest'
           BUNDLED_FNA=$(find "$APP" -name FNA.dll -type f -print -quit)
           test -n "$BUNDLED_FNA"
           DOTNET_ROLL_FORWARD=Major dotnet desktop-check-out/DesktopCheck.dll --verify-fna deps/FNA.dll "$BUNDLED_FNA"
