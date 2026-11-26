@@ -23,7 +23,8 @@ internal sealed class PreferencesSnapshotStore : ISnapshotStore
         using var proposed = (NSMutableDictionary)domain.MutableCopy();
         using var key = new NSString(Key);
         using var value = new NSString(candidate);
-        proposed.SetObject(value, key);
+        // Use the public managed indexer; SetObject is not public in .NET tvOS.
+        proposed[key] = value;
         using var serialized = NSPropertyListSerialization.DataWithPropertyList(proposed,
             (NSPropertyListFormat)100, (NSPropertyListWriteOptions)0, out var error);
         if (serialized == null || error != null)
