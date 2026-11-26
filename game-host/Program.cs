@@ -22,6 +22,8 @@ internal static class Program
     private static UIWindow? diagnosticWindow;
     private static string? gameLogPath, initialLogDigest;
     private static bool logBaselineKnown;
+    private static SaveCoordinator? saveCoordinator;
+    private static Type? bridgeType;
     private static readonly SdlMain Callback = Run;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -129,7 +131,10 @@ internal static class Program
             {
                 CaptureGameLogBaseline();
                 RunGame();
-                ShowDiagnostic("Game entry point returned.", null);
+                if (CleanQuit())
+                    ShowDiagnostic("Celeste closed normally. Use the TV remote to return Home.", null, true);
+                else
+                    ShowDiagnostic("Game entry point returned.", null);
             }
             return 0;
         }
@@ -180,7 +185,12 @@ internal static class Program
         if (game) stage = "Load Celeste.dll";
         var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(Payload, file));
         NativeLibrary.SetDllImportResolver(assembly, Resolve);
-        if (game) stage = "Find game entry point";
+        if (game)
+        {
+            stage = "Initialize persistent save bridge";
+            ConfigureSaveBridge(assembly);
+            stage = "Find game entry point";
+        }
         var entry = assembly.EntryPoint;
         if (entry == null && game)
             entry = assembly.GetType("Celeste.Celeste", true)!
@@ -241,7 +251,50 @@ internal static class Program
         catch (Exception e) { return "\nCould not read game error log: " + e.Message; }
     }
 
-    private static void ShowDiagnostic(string summary, Exception? error)
+    private static void ConfigureSaveBridge(Assembly game)
+    {
+        // Require the matching local patch, not a silently unprotected game.
+        var bridge = game.GetType("Celeste.TvosBridge", true)!;
+        var saved = bridge.GetField("Saved", BindingFlags.Public | BindingFlags.Static);
+        var deleting = bridge.GetField("Deleting", BindingFlags.Public | BindingFlags.Static);
+        if (saved?.FieldType != typeof(Action<string, byte[]>)
+            || deleting?.FieldType != typeof(Func<string, bool>)
+            || bridge.GetField("QuitRequested")?.FieldType != typeof(bool)
+            || bridge.GetField("QuitCompleted")?.FieldType != typeof(bool))
+            throw new InvalidOperationException("Matching v10 local save bridge required");
+        if (!logBaselineKnown || gameLogPath == null)
+            throw new IOException("Cannot establish SDL preference path");
+        var directory = Path.Combine(Path.GetDirectoryName(gameLogPath)!, "Saves");
+        var userIO = game.GetType("Celeste.UserIO", true)!;
+        var path = userIO.GetField("SavePath", BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null) as string;
+        if (path == null || !String.Equals(Path.GetFullPath(path), Path.GetFullPath(directory), StringComparison.Ordinal))
+            throw new IOException("Game save path differs from host path");
+        var coordinator = new SaveCoordinator(directory, new PreferencesSnapshotStore());
+        coordinator.Initialize();
+        saved.SetValue(null, new Action<string, byte[]>(coordinator.Saved));
+        deleting.SetValue(null, new Func<string, bool>(coordinator.Deleting));
+        saveCoordinator = coordinator;
+        bridgeType = bridge;
+    }
+
+    private static bool CleanQuit()
+    {
+        try
+        {
+            return bridgeType != null
+                && (bool)bridgeType.GetField("QuitRequested")!.GetValue(null)!
+                && (bool)bridgeType.GetField("QuitCompleted")!.GetValue(null)!
+                && logBaselineKnown && gameLogPath != null
+                && LogDigest(gameLogPath) == initialLogDigest;
+        }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine("Exit state unavailable: " + e.Message);
+            return false;
+        }
+    }
+
+    private static void ShowDiagnostic(string summary, Exception? error, bool cleanExit = false)
     {
         // SDL's UIKit delegate continues the event loop after its main callback
         // returns. Keep a strong reference to a separate window, above SDL's
@@ -249,8 +302,8 @@ internal static class Program
         var detail = error?.ToString() ?? "";
         if (error is TargetInvocationException && error.InnerException != null)
             detail = error.InnerException.ToString();
-        detail += ReadGameLogDiagnostic();
-        var message = summary + "\nStage: " + stage + "\n" + detail;
+        if (!cleanExit) detail += ReadGameLogDiagnostic();
+        var message = cleanExit ? summary : summary + "\nStage: " + stage + "\n" + detail;
         Console.Error.WriteLine(message);
         try
         {

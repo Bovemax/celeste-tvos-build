@@ -10,7 +10,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: fna-game-host
+  group: fna-game-host-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   host:
@@ -21,6 +21,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Verify portable save lifecycle
+        run: dotnet run --project save-protection/SaveProtection.csproj -c Release
       - name: Build pinned public managed FNA
         run: |
           set -euo pipefail

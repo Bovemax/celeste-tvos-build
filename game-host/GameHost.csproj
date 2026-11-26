@@ -18,4 +18,13 @@
       <Private>true</Private>
     </Reference>
   </ItemGroup>
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../save-protection/SaveSnapshot.cs" Link="SaveSnapshot.cs" />
+    <Compile Include="../save-protection/SavePolicy.cs" Link="SavePolicy.cs" />
+    <Compile Include="../save-protection/SaveRestore.cs" Link="SaveRestore.cs" />
+    <Compile Include="../save-protection/SaveCoordinator.cs" Link="SaveCoordinator.cs" />
+  </ItemGroup>
 </Project>
