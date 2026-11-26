@@ -1,6 +1,6 @@
 # v10 integration candidate
 
-Not a release. Preserve installed v9 and use a separate signed identity for full-game testing first. The production host retains the existing unsigned normal-game identifier; the signing tool must create a separate identity if testing this candidate. Do not install over v9 until backup/export and full-game integration are verified.
+Not a release. Preserve installed v9 and use a separate signed identity for full-game testing first. This candidate explicitly reuses the verified isolated runtime-test identity and refuses other identifiers before preparing the writable directory. The production release will retain the existing normal-game identifier only after the integration is verified. Do not install over v9 until backup/export and full-game integration are verified.
 
 Local source patch only: apply tools/Apply-V10Bridge.ps1 to a copy of the previously working v9 decompiled source. It checks unique anchors, keeps originals and creates an original bridge class. Host requires the matching patched assembly. No proprietary source is included.
 

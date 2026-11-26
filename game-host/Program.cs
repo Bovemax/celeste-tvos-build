@@ -122,6 +122,8 @@ internal static class Program
     {
         try
         {
+            if (!RuntimeTestIdentity.IsAllowed(NSBundle.MainBundle.BundleIdentifier))
+                throw new InvalidOperationException("v10 integration test requires the separate runtime test identity.");
             stage = "Prepare writable location";
             PrepareWritableLocation();
             Console.WriteLine("Apple controllers: " + GCController.Controllers.Length);

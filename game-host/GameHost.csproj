@@ -4,8 +4,8 @@
     <OutputType>Exe</OutputType>
     <RuntimeIdentifier>tvos-arm64</RuntimeIdentifier>
     <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
-    <ApplicationId>org.example.celestelocalhost</ApplicationId>
-    <ApplicationTitle>Local FNA Game Host</ApplicationTitle>
+    <ApplicationId>org.example.celestelocalhost.runtimetest</ApplicationId>
+    <ApplicationTitle>Celeste v10 Test</ApplicationTitle>
     <UseInterpreter>true</UseInterpreter>
     <TrimMode>copy</TrimMode>
     <Nullable>enable</Nullable>
