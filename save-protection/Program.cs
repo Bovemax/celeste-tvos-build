@@ -54,4 +54,72 @@ Reject(() => SavePolicy.Saved(snapshot, "../bad.celeste", new byte[] { 1 }));
 Reject(() => SavePolicy.Deleted(snapshot, "../bad.celeste"));
 Reject(() => SavePolicy.Saved(snapshot, "0.celeste", new byte[SaveSnapshot.MaxRaw + 1]));
 Assert(SaveSnapshot.Decode(snapshot)["0.celeste"].SequenceEqual(files["0.celeste"]));
-Console.WriteLine($"PASS: {checks} snapshot codec and recovery policy regression checks");
+var recoveryDir = Path.Combine(Path.GetTempPath(), "celeste-recovery-" + Guid.NewGuid().ToString("N"));
+try
+{
+    Assert(SaveRestore.TryRestoreMissing(snapshot, recoveryDir, "0.celeste"));
+    var primary = Path.Combine(recoveryDir, "0.celeste");
+    Assert(File.ReadAllBytes(primary).SequenceEqual(files["0.celeste"]));
+    File.WriteAllBytes(primary, new byte[] { 9, 8, 7 });
+    Assert(!SaveRestore.TryRestoreMissing(snapshot, recoveryDir, "0.celeste"));
+    Assert(File.ReadAllBytes(primary).SequenceEqual(new byte[] { 9, 8, 7 }));
+    File.Delete(primary);
+    Assert(SaveRestore.TryRestoreMissing(snapshot, recoveryDir, "0.celeste"));
+    Assert(File.ReadAllBytes(primary).SequenceEqual(files["0.celeste"]));
+    Reject(() => SaveRestore.TryRestoreMissing(snapshot, recoveryDir, "../bad.celeste"));
+    Reject(() => SaveRestore.TryRestoreMissing(deleted, recoveryDir, "0.celeste"));
+    Assert(Directory.GetFiles(recoveryDir).Length == 1);
+}
+finally { if (Directory.Exists(recoveryDir)) Directory.Delete(recoveryDir, true); }
+var migrationDir = Path.Combine(Path.GetTempPath(), "celeste-migration-" + Guid.NewGuid().ToString("N"));
+try
+{
+    Directory.CreateDirectory(migrationDir);
+    var primary = Path.Combine(migrationDir, "0.celeste");
+    File.WriteAllBytes(primary, files["0.celeste"]);
+    var store = new FixtureStore();
+    var coordinator = new SaveCoordinator(migrationDir, store);
+    coordinator.Initialize();
+    Assert(SaveSnapshot.Decode(store.Read()!)["0.celeste"].SequenceEqual(files["0.celeste"]));
+    Assert(File.ReadAllBytes(primary).SequenceEqual(files["0.celeste"]));
+    File.Delete(primary);
+    new SaveCoordinator(migrationDir, store).Initialize();
+    Assert(File.ReadAllBytes(primary).SequenceEqual(files["0.celeste"]));
+    var newerBytes = new byte[] { 7, 8, 9 };
+    File.WriteAllBytes(primary, newerBytes);
+    coordinator.Saved("0", newerBytes);
+    Assert(SaveSnapshot.Decode(store.Read()!)["0.celeste"].SequenceEqual(newerBytes));
+    var saved = store.Read();
+    store.Fail = true;
+    try { coordinator.Saved("0", newerBytes); throw new Exception("Expected failed commit"); }
+    catch (IOException) { checks++; }
+    Assert(store.Read() == saved);
+    Assert(!coordinator.Deleting("0"));
+    Assert(File.Exists(primary));
+    store.Fail = false;
+    Assert(coordinator.Deleting("0"));
+    File.Delete(primary);
+    new SaveCoordinator(migrationDir, store).Initialize();
+    Assert(!File.Exists(primary));
+    // Simulate a failed disk deletion or untracked write: don't resurrect,
+    // overwrite or accept a conflicting inventory silently.
+    File.WriteAllBytes(primary, newerBytes);
+    try { new SaveCoordinator(migrationDir, store).Initialize(); throw new Exception("Expected conflict"); }
+    catch (IOException) { checks++; }
+    Assert(File.ReadAllBytes(primary).SequenceEqual(newerBytes));
+    Assert(SaveSnapshot.Decode(store.Read()!).Count == 0);
+}
+finally { if (Directory.Exists(migrationDir)) Directory.Delete(migrationDir, true); }
+Console.WriteLine($"PASS: {checks} snapshot, recovery and save lifecycle regression checks");
+
+sealed class FixtureStore : ISnapshotStore
+{
+    private string? value;
+    public bool Fail;
+    public string? Read() => value;
+    public void Commit(string candidate)
+    {
+        if (Fail) throw new IOException("Simulated persistence failure");
+        value = candidate;
+    }
+}
