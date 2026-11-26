@@ -21,6 +21,7 @@
   <ItemGroup>
     <Compile Include="../save-protection/SaveSnapshot.cs" Link="SaveSnapshot.cs" />
     <Compile Include="../save-protection/SavePolicy.cs" Link="SavePolicy.cs" />
+    <Compile Include="../save-protection/SaveRestore.cs" Link="SaveRestore.cs" />
   </ItemGroup>
   <PropertyGroup>
     <ImplicitUsings>enable</ImplicitUsings>

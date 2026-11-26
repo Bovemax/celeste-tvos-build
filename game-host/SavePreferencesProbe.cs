@@ -11,7 +11,7 @@ namespace LocalGameHost;
 // This never accesses the game's save paths or executes game code.
 internal static class SavePreferencesProbe
 {
-    private const string Key = "CelesteSaveProbe.v1";
+    private const string Key = "CelesteSaveProbe.v2";
     private const int Budget = 384 * 1024;
     internal static string Run()
     {
@@ -21,12 +21,32 @@ internal static class SavePreferencesProbe
         var defaults = NSUserDefaults.StandardUserDefaults;
         var previous = defaults.StringForKey(Key);
         var fixture = Encoding.UTF8.GetBytes("<fixture>Celeste preferences probe</fixture>");
+        var home = Environment.GetEnvironmentVariable("HOME");
+        if (String.IsNullOrEmpty(home)) throw new IOException("No application home");
+        var directory = Path.Combine(home, "Library", "Caches", "CelesteSyntheticRecovery-v2");
+        var path = Path.Combine(directory, "probe.celeste");
         if (previous != null)
         {
             var loaded = SaveSnapshot.Decode(previous);
             if (loaded.Count != 1 || !loaded.TryGetValue("probe.celeste", out var data) || !data.SequenceEqual(fixture))
                 throw new InvalidDataException("Persistent fixture mismatch; no changes made");
-            return "PASS: persistent save snapshot read on later launch.\nChecksum and contents verified.\nNo game saves accessed.";
+            if (File.Exists(path))
+            {
+                // Only a previously recovered, byte-identical fixture may be
+                // removed on repeated runs. Never remove a conflicting file.
+                if (!File.ReadAllBytes(path).SequenceEqual(fixture))
+                    throw new InvalidDataException("Unexpected existing fixture; left unchanged");
+                File.Delete(path);
+            }
+            if (File.Exists(path)) throw new IOException("Fixture still exists");
+            if (!SaveRestore.TryRestoreMissing(previous, directory, "probe.celeste")
+                || !File.ReadAllBytes(path).SequenceEqual(fixture))
+                throw new IOException("Restored fixture mismatch");
+            if (SaveRestore.TryRestoreMissing(previous, directory, "probe.celeste"))
+                throw new IOException("Existing file overwrite guard failed");
+            if (!File.ReadAllBytes(path).SequenceEqual(fixture))
+                throw new IOException("Existing fixture changed");
+            return "PASS: snapshot survived relaunch.\nPASS: missing cached save restored byte-for-byte.\nPASS: existing file not overwritten.\nSynthetic data only; no game saves accessed.";
         }
         var candidate = SaveSnapshot.Encode(new Dictionary<string, byte[]> { ["probe.celeste"] = fixture });
         // Measure the existing persistent domain as XML, then conservatively
@@ -42,6 +62,13 @@ internal static class SavePreferencesProbe
         defaults.SetString(candidate, Key);
         if (defaults.StringForKey(Key) != candidate)
             throw new IOException("Preferences immediate read-back failed");
-        return "PASS: snapshot written and immediate read-back verified.\nClose this test app completely and reopen it to verify persistence.\nNo game saves accessed.";
+        // Exercise loss of just our own fixture, not actual game caches.
+        if (!SaveRestore.TryRestoreMissing(candidate, directory, "probe.celeste"))
+            throw new IOException("Synthetic fixture already exists; left unchanged");
+        if (!File.ReadAllBytes(path).SequenceEqual(fixture))
+            throw new IOException("Synthetic fixture mismatch");
+        File.Delete(path);
+        if (File.Exists(path)) throw new IOException("Fixture still exists");
+        return "PASS: snapshot written; cached test save deleted.\nClose this test app completely and reopen it.\nNo game saves accessed.";
     }
 }

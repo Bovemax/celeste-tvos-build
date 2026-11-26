@@ -54,4 +54,21 @@ Reject(() => SavePolicy.Saved(snapshot, "../bad.celeste", new byte[] { 1 }));
 Reject(() => SavePolicy.Deleted(snapshot, "../bad.celeste"));
 Reject(() => SavePolicy.Saved(snapshot, "0.celeste", new byte[SaveSnapshot.MaxRaw + 1]));
 Assert(SaveSnapshot.Decode(snapshot)["0.celeste"].SequenceEqual(files["0.celeste"]));
-Console.WriteLine($"PASS: {checks} snapshot codec and recovery policy regression checks");
+var recoveryDir = Path.Combine(Path.GetTempPath(), "celeste-recovery-" + Guid.NewGuid().ToString("N"));
+try
+{
+    Assert(SaveRestore.TryRestoreMissing(snapshot, recoveryDir, "0.celeste"));
+    var primary = Path.Combine(recoveryDir, "0.celeste");
+    Assert(File.ReadAllBytes(primary).SequenceEqual(files["0.celeste"]));
+    File.WriteAllBytes(primary, new byte[] { 9, 8, 7 });
+    Assert(!SaveRestore.TryRestoreMissing(snapshot, recoveryDir, "0.celeste"));
+    Assert(File.ReadAllBytes(primary).SequenceEqual(new byte[] { 9, 8, 7 }));
+    File.Delete(primary);
+    Assert(SaveRestore.TryRestoreMissing(snapshot, recoveryDir, "0.celeste"));
+    Assert(File.ReadAllBytes(primary).SequenceEqual(files["0.celeste"]));
+    Reject(() => SaveRestore.TryRestoreMissing(snapshot, recoveryDir, "../bad.celeste"));
+    Reject(() => SaveRestore.TryRestoreMissing(deleted, recoveryDir, "0.celeste"));
+    Assert(Directory.GetFiles(recoveryDir).Length == 1);
+}
+finally { if (Directory.Exists(recoveryDir)) Directory.Delete(recoveryDir, true); }
+Console.WriteLine($"PASS: {checks} snapshot, policy and filesystem restore regression checks");
