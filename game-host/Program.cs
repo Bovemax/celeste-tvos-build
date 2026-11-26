@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -120,17 +122,10 @@ internal static class Program
     {
         try
         {
-            stage = "Prepare writable location";
-            PrepareWritableLocation();
-            Console.WriteLine("Apple controllers: " + GCController.Controllers.Length);
-            if (!File.Exists(Path.Combine(Payload, "Celeste.dll")))
-                RunProbe();
-            else
-            {
-                CaptureGameLogBaseline();
-                RunGame();
-                ShowDiagnostic("Game entry point returned.", null);
-            }
+            stage = "Isolated runtime test";
+            if (!(NSBundle.MainBundle.BundleIdentifier ?? "").EndsWith(".runtimetest", StringComparison.Ordinal))
+                throw new InvalidOperationException("Test build requires a separate bundle identifier ending in .runtimetest.");
+            ShowMessage(RunRuntimePreflight());
             return 0;
         }
         catch (Exception e)
@@ -241,6 +236,74 @@ internal static class Program
         catch (Exception e) { return "\nCould not read game error log: " + e.Message; }
     }
 
+    // Deliberately never starts the game, creates sessions, or invokes save APIs.
+    private static string RunRuntimePreflight()
+    {
+        AssemblyLoadContext.Default.Resolving += (context, name) =>
+        {
+            if (name.Name == "FNA") return typeof(Game).Assembly;
+            if (name.Name != "Celeste.Content") return null;
+            var a = context.LoadFromAssemblyPath(Path.Combine(Payload, "Celeste.Content.dll"));
+            NativeLibrary.SetDllImportResolver(a, Resolve);
+            return a;
+        };
+        var game = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(Payload, "Celeste.dll"));
+        NativeLibrary.SetDllImportResolver(game, Resolve);
+        var results = new List<string> { "Celeste isolated runtime preflight" };
+        try
+        {
+            var tile = game.GetType("Celeste.AnimatedTiles+Tile", true)!;
+            var listType = typeof(List<>).MakeGenericType(tile);
+            var value = Activator.CreateInstance(listType)!;
+            var mapType = game.GetType("Monocle.VirtualMap`1", true)!.MakeGenericType(listType);
+            var map = Activator.CreateInstance(mapType, new object?[] { 100, 100, null })!;
+            var indexer = mapType.GetProperty("Item")!;
+            foreach (var point in new[] { new[] { 0, 0 }, new[] { 51, 51 } })
+            {
+                var coords = new object[] { point[0], point[1] };
+                indexer.SetValue(map, value, coords);
+                if (!ReferenceEquals(value, indexer.GetValue(map, coords)))
+                    throw new InvalidOperationException("VirtualMap read-back mismatch");
+            }
+            results.Add("PASS: actual AnimatedTiles VirtualMap setter/getter");
+        }
+        catch (Exception e)
+        {
+            var actual = e is TargetInvocationException tie && tie.InnerException != null ? tie.InnerException : e;
+            results.Add("FAIL: AnimatedTiles VirtualMap: " + actual.GetType().Name + ": " + actual.Message);
+            Console.Error.WriteLine(e);
+        }
+        var decoder = game.GetType("Celeste.BinaryPacker", true)!.GetMethod("FromBinary",
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, null, new[] { typeof(string) }, null)
+            ?? throw new MissingMethodException("BinaryPacker.FromBinary(string)");
+        var maps = Directory.GetFiles(Path.Combine(Payload, "Content", "Maps"), "*.bin", SearchOption.AllDirectories)
+            .OrderBy(x => x, StringComparer.Ordinal).ToArray();
+        if (maps.Length == 0) throw new IOException("No maps found");
+        int passed = 0;
+        var failures = new List<string>();
+        foreach (var file in maps)
+        {
+            try
+            {
+                if (decoder.Invoke(null, new object[] { file }) == null)
+                    throw new InvalidDataException("Decoder returned null");
+                passed++;
+                Console.WriteLine("PASS map " + Path.GetFileName(file));
+            }
+            catch (Exception e)
+            {
+                var actual = e is TargetInvocationException tie && tie.InnerException != null ? tie.InnerException : e;
+                failures.Add(Path.GetFileName(file) + ": " + actual.GetType().Name + ": " + actual.Message);
+                Console.Error.WriteLine("FAIL map " + file + ": " + e);
+            }
+        }
+        results.Add($"Maps decoded on device: {passed}/{maps.Length}");
+        results.AddRange(failures.Take(3));
+        if (failures.Count > 3) results.Add("Additional failures: " + (failures.Count - 3));
+        results.Add("No gameplay or save APIs invoked. Not a room-load test.");
+        return string.Join("\n", results);
+    }
+
     private static void ShowDiagnostic(string summary, Exception? error)
     {
         // SDL's UIKit delegate continues the event loop after its main callback
@@ -251,6 +314,11 @@ internal static class Program
             detail = error.InnerException.ToString();
         detail += ReadGameLogDiagnostic();
         var message = summary + "\nStage: " + stage + "\n" + detail;
+        ShowMessage(message);
+    }
+
+    private static void ShowMessage(string message)
+    {
         Console.Error.WriteLine(message);
         try
         {
