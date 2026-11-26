@@ -7,6 +7,40 @@ using System.Runtime.Loader;
 
 // Uses the exact public FNA managed assembly supplied with the host build.
 // No game files are uploaded. By default, do not execute game code or native calls.
+if (args.Length == 1 && args[0] == "--verify-test-identity")
+{
+    const string test = LocalGameHost.RuntimeTestIdentity.BaseId;
+    const string normal = "org.example.celestelocalhost";
+    var cases = new (string? Id, bool Allowed)[]
+    {
+        (test, true),
+        (test + ".ABCDEFGHIJ", true),
+        (test + ".ABC123DE45", true),
+        (normal, false),
+        (normal + ".ABCDEFGHIJ", false),
+        ("other.application.runtimetest", false),
+        (test + "x.ABCDEFGHIJ", false),
+        (test + ".ABCDEFGHI", false),
+        (test + ".ABCDEFGHIJK", false),
+        (test + ".ABCDEFGHIJ.extra", false),
+        (test + ".abcdefghij", false),
+        (test + ".", false),
+        (test + ".ABCDEF-HIJ", false),
+        (null, false),
+        ("", false)
+    };
+    foreach (var (id, expected) in cases)
+    {
+        bool actual = LocalGameHost.RuntimeTestIdentity.IsAllowed(id);
+        if (actual != expected)
+        {
+            Console.Error.WriteLine("Identity regression failed: " + id);
+            return 1;
+        }
+    }
+    Console.WriteLine($"PASS: {cases.Length} isolated test identity regression cases.");
+    return 0;
+}
 if (args.Length == 3 && args[0] == "--verify-fna")
 {
     try { VerifyFna(args[1], args[2]); return 0; }

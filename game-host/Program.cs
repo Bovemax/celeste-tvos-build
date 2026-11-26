@@ -123,8 +123,10 @@ internal static class Program
         try
         {
             stage = "Isolated runtime test";
-            if (!(NSBundle.MainBundle.BundleIdentifier ?? "").EndsWith(".runtimetest", StringComparison.Ordinal))
-                throw new InvalidOperationException("Test build requires a separate bundle identifier ending in .runtimetest.");
+            var installedId = NSBundle.MainBundle.BundleIdentifier;
+            if (!RuntimeTestIdentity.IsAllowed(installedId))
+                throw new InvalidOperationException("Test application identity rejected: " + (installedId ?? "(missing)"));
+            Console.WriteLine("Isolated test identity: " + installedId);
             ShowMessage(RunRuntimePreflight());
             return 0;
         }
