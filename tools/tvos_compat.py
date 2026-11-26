@@ -14,6 +14,9 @@ _SETTER = re.compile(
     r"(?:Batch|Interactive|LowLatency|SustainedLowLatency|NoGCRegion)[ \t]*;[ \t]*(?://[^\r\n]*)?$"
 )
 _ERROR_OPEN = re.compile(r"(?m)^([ \t]*)(?:System\.Diagnostics\.)?Process\.Start\([ \t]*Filename[ \t]*\);[ \t]*$")
+# Device-confirmed Mono multidimensional-array access workaround.
+_TILE_PRIVATE = re.compile(r"(?m)^([ \t]*)private([ \t]+class[ \t]+Tile\b)")
+_TILE_PUBLIC = re.compile(r"(?m)^[ \t]*public[ \t]+class[ \t]+Tile\b")
 _ENTRY_ASSEMBLY = re.compile(r"\bAssembly\s*\.\s*GetEntryAssembly\s*\(")
 _REMAINING_SETTER = re.compile(r"\bGCSettings\s*\.\s*LatencyMode\s*=(?!=)")
 _RISK = {
@@ -35,6 +38,7 @@ def repair_source(source, log=print):
         raise ValueError("Expected decompiled Monocle/Engine.cs")
     changes = []
     errorlog = source / "Monocle" / "ErrorLog.cs"
+    animated = source / "Celeste" / "AnimatedTiles.cs"
     entry_refs = []
     findings = []
     unexpected = []
@@ -58,6 +62,14 @@ def repair_source(source, log=print):
         if path == errorlog:
             updated, count = _ERROR_OPEN.subn(lambda m: m.group(1) + 'System.Console.Error.WriteLine("Error log: " + Filename);', updated)
             kind = "desktop error-log launch"
+        if path == animated:
+            private_count = len(_TILE_PRIVATE.findall(updated))
+            public_count = len(_TILE_PUBLIC.findall(updated))
+            if (private_count, public_count) == (1, 0):
+                updated, count = _TILE_PRIVATE.subn(r"\1public\2", updated)
+                kind = "animated tile array accessibility"
+            elif (private_count, public_count) != (0, 1):
+                raise ValueError("Unexpected AnimatedTiles.Tile declaration; review manually")
         if count:
             changes.append((path, (b"\xef\xbb\xbf" if bom else b"") +
                             updated.replace("\n", newline).encode("utf-8"), count, kind))

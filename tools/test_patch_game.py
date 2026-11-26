@@ -106,3 +106,18 @@ class TvOSCompatibilityTests(unittest.TestCase):
                 self.assertEqual(audit_native(root, root / "native", root / "fmod", log.append), (1, 1, 1, 1))
             self.assertTrue(any("MISSING" in line and "Missing" in line for line in log))
             self.assertTrue(any("UNMAPPED" in line and "LinuxOnly" in line for line in log))
+
+
+    def test_confirmed_nested_tile_visibility_fix(self):
+        from tvos_compat import repair_source
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "Monocle").mkdir()
+            (root / "Monocle" / "Engine.cs").write_text("class Engine {}\n", encoding="utf-8")
+            (root / "Celeste").mkdir()
+            animated = root / "Celeste" / "AnimatedTiles.cs"
+            animated.write_text("public class AnimatedTiles {\n  private class Tile {}\n  private int value;\n}\n", encoding="utf-8")
+            self.assertEqual(repair_source(root), 1)
+            self.assertIn("public class Tile", animated.read_text())
+            self.assertIn("private int value", animated.read_text())
+            self.assertEqual(repair_source(root), 0)
