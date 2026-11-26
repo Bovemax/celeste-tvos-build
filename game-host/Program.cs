@@ -23,6 +23,7 @@ internal static class Program
     private static string? gameLogPath, initialLogDigest;
     private static bool logBaselineKnown;
     private static SaveCoordinator? saveCoordinator;
+    private static bool recoveryScreenShown;
     private static Type? bridgeType;
     private static readonly SdlMain Callback = Run;
 
@@ -133,6 +134,7 @@ internal static class Program
             {
                 CaptureGameLogBaseline();
                 RunGame();
+                if (recoveryScreenShown) return 0;
                 if (CleanQuit())
                     ShowDiagnostic("Celeste closed normally. Use the TV remote to return Home.", null, true);
                 else
@@ -190,7 +192,7 @@ internal static class Program
         if (game)
         {
             stage = "Initialize persistent save bridge";
-            ConfigureSaveBridge(assembly);
+            if (!ConfigureSaveBridge(assembly)) return null;
             stage = "Find game entry point";
         }
         var entry = assembly.EntryPoint;
@@ -253,7 +255,7 @@ internal static class Program
         catch (Exception e) { return "\nCould not read game error log: " + e.Message; }
     }
 
-    private static void ConfigureSaveBridge(Assembly game)
+    private static bool ConfigureSaveBridge(Assembly game)
     {
         // Require the matching local patch, not a silently unprotected game.
         var bridge = game.GetType("Celeste.TvosBridge", true)!;
@@ -272,11 +274,25 @@ internal static class Program
         if (path == null || !String.Equals(Path.GetFullPath(path), Path.GetFullPath(directory), StringComparison.Ordinal))
             throw new IOException("Game save path differs from host path");
         var coordinator = new SaveCoordinator(directory, new PreferencesSnapshotStore());
+        // This branch is explicitly a one-shot, isolated recovery test.
+        // The runtime test identity has already been checked before this point.
+        const string marker = "CelesteRealRecoveryProbe.v1";
+        var defaults = NSUserDefaults.StandardUserDefaults;
+        if (defaults.StringForKey(marker) != "passed")
+        {
+            stage = "Verify persistent real-game save and simulate cache loss";
+            var report = coordinator.TestRecoveryOnce();
+            defaults.SetString("passed", marker);
+            recoveryScreenShown = true;
+            ShowDiagnostic(report + "\nCompletely close and reopen this test app. Then load your existing test save.", null, true);
+            return false;
+        }
         coordinator.Initialize();
         saved.SetValue(null, new Action<string, byte[]>(coordinator.Saved));
         deleting.SetValue(null, new Func<string, bool>(coordinator.Deleting));
         saveCoordinator = coordinator;
         bridgeType = bridge;
+        return true;
     }
 
     private static bool CleanQuit()

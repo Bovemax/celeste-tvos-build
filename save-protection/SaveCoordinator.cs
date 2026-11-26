@@ -50,6 +50,56 @@ internal sealed class SaveCoordinator
         }
     }
 
+    // Explicitly invoked only by the isolated recovery-probe host.
+    // Keep the original under a different name instead of deleting it.
+    internal string TestRecoveryOnce()
+    {
+        lock (gate)
+        {
+            var snapshot = store.Read() ?? throw new IOException("No pre-existing persistent backup. Nothing moved.");
+            var durable = SaveSnapshot.Decode(snapshot);
+            var primary = Inventory();
+            var plan = SavePolicy.Inspect(snapshot, primary);
+            if (plan.Conflicting.Length != 0 || plan.Missing.Length != 0
+                || primary.Keys.Any(k => !durable.ContainsKey(k)))
+                throw new IOException("Cached files and persistent backup differ. Nothing moved.");
+            var slots = primary.Keys.Where(k => System.Text.RegularExpressions.Regex.IsMatch(k, @"\A[0-9]+\.celeste\z")).ToArray();
+            if (slots.Length != 1)
+                throw new IOException("Recovery probe requires exactly one disposable numbered save slot. Nothing moved.");
+            var name = slots[0];
+            var target = Path.Combine(directory, name);
+            var held = Path.Combine(directory, ".v10-recovery-original");
+            if (File.Exists(held) || Directory.Exists(held))
+                throw new IOException("Recovery probe original already retained; refusing to repeat.");
+            var expected = durable[name];
+            if (!ReadBounded(target).SequenceEqual(expected))
+                throw new IOException("Persistent backup no longer matches. Nothing moved.");
+            File.Move(target, held, overwrite: false);
+            try
+            {
+                if (File.Exists(target)) throw new IOException("Primary did not disappear");
+                // Use the ordinary production startup recovery, not a separate
+                // implementation; do not change the persistent snapshot.
+                Initialize();
+                if (!ReadBounded(target).SequenceEqual(expected) || !ReadBounded(held).SequenceEqual(expected))
+                    throw new IOException("Recovered bytes differ from original");
+                return "PASS: persistent real-game backup matched " + name
+                    + "\nPASS: original moved aside, cached primary absent"
+                    + "\nPASS: normal startup restored exact original bytes ("
+                    + expected.Length + " bytes)"
+                    + "\nOriginal retained separately. No settings or other saves removed.";
+            }
+            catch
+            {
+                // Never overwrite an existing primary on failure. The retained
+                // original remains available even if recovery partly succeeded.
+                if (!File.Exists(target) && !Directory.Exists(target) && File.Exists(held))
+                    File.Move(held, target, overwrite: false);
+                throw;
+            }
+        }
+    }
+
     internal void Saved(string slot, byte[] expected)
     {
         lock (gate)

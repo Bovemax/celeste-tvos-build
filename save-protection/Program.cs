@@ -110,7 +110,36 @@ try
     Assert(SaveSnapshot.Decode(store.Read()!).Count == 0);
 }
 finally { if (Directory.Exists(migrationDir)) Directory.Delete(migrationDir, true); }
-Console.WriteLine($"PASS: {checks} snapshot, recovery and save lifecycle regression checks");
+var probeDir = Path.Combine(Path.GetTempPath(), "celeste-real-probe-" + Guid.NewGuid().ToString("N"));
+try
+{
+    Directory.CreateDirectory(probeDir);
+    var target = Path.Combine(probeDir, "0.celeste");
+    var original = Path.Combine(probeDir, ".v10-recovery-original");
+    File.WriteAllBytes(target, files["0.celeste"]);
+    var store = new FixtureStore();
+    var coordinator = new SaveCoordinator(probeDir, store);
+    try { coordinator.TestRecoveryOnce(); throw new Exception("Expected absent backup refusal"); }
+    catch (IOException) { checks++; }
+    Assert(File.Exists(target) && !File.Exists(original));
+    coordinator.Initialize();
+    var prior = store.Read();
+    File.WriteAllBytes(target, new byte[] { 7 });
+    try { coordinator.TestRecoveryOnce(); throw new Exception("Expected conflicting backup refusal"); }
+    catch (IOException) { checks++; }
+    Assert(File.ReadAllBytes(target).SequenceEqual(new byte[] { 7 }) && !File.Exists(original));
+    File.WriteAllBytes(target, files["0.celeste"]);
+    var result = coordinator.TestRecoveryOnce();
+    Assert(result.Contains("PASS: normal startup restored exact original bytes"));
+    Assert(File.ReadAllBytes(target).SequenceEqual(files["0.celeste"]));
+    Assert(File.ReadAllBytes(original).SequenceEqual(files["0.celeste"]));
+    Assert(store.Read() == prior);
+    try { coordinator.TestRecoveryOnce(); throw new Exception("Expected repeated probe refusal"); }
+    catch (IOException) { checks++; }
+    Assert(File.Exists(target) && File.Exists(original));
+}
+finally { if (Directory.Exists(probeDir)) Directory.Delete(probeDir, true); }
+Console.WriteLine($"PASS: {checks} snapshot, recovery, save lifecycle and real-save probe regression checks");
 
 sealed class FixtureStore : ISnapshotStore
 {
