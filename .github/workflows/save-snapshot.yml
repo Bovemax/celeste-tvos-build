@@ -1,0 +1,18 @@
+name: Save snapshot regression
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'save-protection/**'
+      - '.github/workflows/save-snapshot.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet run --project save-protection/SaveProtection.csproj -c Release
