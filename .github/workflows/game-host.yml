@@ -42,6 +42,8 @@ jobs:
           dotnet publish desktop-check/DesktopCheck.csproj -c Release -o desktop-check-out -p:UseAppHost=false
           cp deps/FNA.dll desktop-check-out/FNA.dll
           cp upstream-fna/licenses/LICENSE desktop-check-out/FNA-LICENSE.txt
+      - name: Build and verify synthetic Everest fixtures
+        run: bash everest-preflight/build-fixtures.sh
       - name: Install tvOS workload
         run: dotnet workload install tvos
       - name: Publish unsigned interpreter host
@@ -51,7 +53,7 @@ jobs:
           APP=$(find game-host/bin -name '*.app' -type d -print -quit)
           test -n "$APP"
           /usr/libexec/PlistBuddy -c 'Print :CelesteLocalPayloadVersion' "$APP/Info.plist" | grep -x 3
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist" | grep -Fx 'org.example.celestelocalhost'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist" | grep -Fx 'org.example.celestelocalhost.runtimetest'
           BUNDLED_FNA=$(find "$APP" -name FNA.dll -type f -print -quit)
           test -n "$BUNDLED_FNA"
           DOTNET_ROLL_FORWARD=Major dotnet desktop-check-out/DesktopCheck.dll --verify-fna deps/FNA.dll "$BUNDLED_FNA"
@@ -59,6 +61,10 @@ jobs:
           mkdir -p out/Payload
           cp probe-payload/bin/Release/net10.0/ExternalProbe.dll out/ExternalProbe.dll
           ditto "$APP" out/Payload/GameHost.app
+          test ! -e out/Payload/GameHost.app/Celeste.dll
+          ditto everest-fixtures-out out/Payload/GameHost.app/EverestFixtures
+          test -s out/Payload/GameHost.app/EverestFixtures/patched/EverestFixture.dll
+          test -s out/Payload/GameHost.app/EverestFixtures/module/EverestMockMod.dll
           # No game files, FMOD, or native dependency binaries are supplied here.
           ditto -c -k --keepParent out/Payload out/GameHost-base.ipa
           unzip -t out/GameHost-base.ipa | tail -1

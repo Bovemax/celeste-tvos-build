@@ -122,22 +122,13 @@ internal static class Program
     {
         try
         {
-            if (!ProductionIdentity.IsAllowed(NSBundle.MainBundle.BundleIdentifier))
-                throw new InvalidOperationException("Production v10 requires the normal Celeste application identity.");
-            stage = "Prepare writable location";
-            PrepareWritableLocation();
-            Console.WriteLine("Apple controllers: " + GCController.Controllers.Length);
-            if (!File.Exists(Path.Combine(Payload, "Celeste.dll")))
-                RunProbe();
-            else
-            {
-                CaptureGameLogBaseline();
-                RunGame();
-                if (CleanQuit())
-                    ShowDiagnostic("Celeste closed normally. Use the TV remote to return Home.", null, true);
-                else
-                    ShowDiagnostic("Game entry point returned.", null);
-            }
+            stage = "Isolated Everest preflight";
+            if (!RuntimeTestIdentity.IsAllowed(NSBundle.MainBundle.BundleIdentifier))
+                throw new InvalidOperationException("Everest preflight requires the separate runtime test identity.");
+            if (File.Exists(Path.Combine(Payload, "Celeste.dll")))
+                throw new InvalidOperationException("Synthetic fixture only; do not package game files.");
+            var report = EverestPreflight.ProbeChecks.Run(Path.Combine(Payload, "EverestFixtures"));
+            ShowDiagnostic(report, null, true);
             return 0;
         }
         catch (Exception e)

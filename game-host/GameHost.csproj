@@ -4,8 +4,8 @@
     <OutputType>Exe</OutputType>
     <RuntimeIdentifier>tvos-arm64</RuntimeIdentifier>
     <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
-    <ApplicationId>org.example.celestelocalhost</ApplicationId>
-    <ApplicationTitle>Local FNA Game Host</ApplicationTitle>
+    <ApplicationId>org.example.celestelocalhost.runtimetest</ApplicationId>
+    <ApplicationTitle>Celeste Everest Preflight</ApplicationTitle>
     <UseInterpreter>true</UseInterpreter>
     <TrimMode>copy</TrimMode>
     <Nullable>enable</Nullable>
@@ -26,5 +26,8 @@
     <Compile Include="../save-protection/SavePolicy.cs" Link="SavePolicy.cs" />
     <Compile Include="../save-protection/SaveRestore.cs" Link="SaveRestore.cs" />
     <Compile Include="../save-protection/SaveCoordinator.cs" Link="SaveCoordinator.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../everest-preflight/shared/ProbeChecks.cs" Link="EverestProbeChecks.cs" />
   </ItemGroup>
 </Project>

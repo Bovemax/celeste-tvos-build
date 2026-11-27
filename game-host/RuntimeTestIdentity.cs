@@ -2,12 +2,12 @@ using System;
 
 namespace LocalGameHost;
 
-internal static class ProductionIdentity
+internal static class RuntimeTestIdentity
 {
-    internal const string BaseId = "org.example.celestelocalhost";
+    internal const string BaseId = "org.example.celestelocalhost.runtimetest";
 
     // The signer can append a single ten-character uppercase alphanumeric
-    // component. Never accept the isolated test ID or unrelated IDs.
+    // component. Never accept the normal game ID or unrelated IDs.
     internal static bool IsAllowed(string? id)
     {
         if (id == BaseId) return true;

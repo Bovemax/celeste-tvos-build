@@ -16,11 +16,5 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: Build synthetic payload
-        run: dotnet build everest-preflight/fixture/Fixture.csproj -c Release -o fixture-out
-      - name: Patch synthetic payload on desktop
-        run: |
-          mkdir -p patched-out
-          dotnet run --project everest-preflight/patch/Patch.csproj -c Release -- fixture-out/EverestFixture.dll patched-out/EverestFixture.dll
-      - name: Verify original and patched payloads
-        run: dotnet run --project everest-preflight/runner/Runner.csproj -c Release -- fixture-out/EverestFixture.dll patched-out/EverestFixture.dll
+      - name: Build and verify synthetic Everest fixtures
+        run: bash everest-preflight/build-fixtures.sh
