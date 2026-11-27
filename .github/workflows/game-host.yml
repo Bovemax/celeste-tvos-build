@@ -51,7 +51,7 @@ jobs:
           APP=$(find game-host/bin -name '*.app' -type d -print -quit)
           test -n "$APP"
           /usr/libexec/PlistBuddy -c 'Print :CelesteLocalPayloadVersion' "$APP/Info.plist" | grep -x 3
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist" | grep -x 'org.example.celestelocalhost.runtimetest'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist" | grep -Fx 'org.example.celestelocalhost'
           BUNDLED_FNA=$(find "$APP" -name FNA.dll -type f -print -quit)
           test -n "$BUNDLED_FNA"
           DOTNET_ROLL_FORWARD=Major dotnet desktop-check-out/DesktopCheck.dll --verify-fna deps/FNA.dll "$BUNDLED_FNA"
