@@ -1,0 +1,13 @@
+# Target-driven Everest development
+
+Primary goals requested by user: Hyperline (https://gamebanana.com/mods/14871), Makima skin (https://gamebanana.com/mods/587353), Skin Mod Helper (Plus) (https://gamebanana.com/mods/473796) if required by actual skin package, CelesteNet (https://github.com/0x0ade/CelesteNet), and in-game missing dependency resolution/relaunch. Exact released ZIP metadata and DLL mechanism inventory not yet verified; do not infer versions from names. CelesteNet upstream main public client metadata inspected: 2.4.2, CelesteNet.Client.dll, EverestCore >= 1.5577.0; verify selected release separately.
+
+First content-only map is an intermediate smoke test, not the final architecture. Avoid investing heavily in a bespoke content-only fork if it delays full Everest. Plan actual Everest offline patching/boot, runtime managed module loading, dependency resolution, typed/interpreter hooks, durable mod storage, and networking. Use only a disposable test identity; keep v10 unchanged.
+
+## Interpreter-specific reference
+MercuryWorkshop/celeste-wasm at f135cce98ab667f31a877a6b294b0e5f154824ed:
+https://github.com/MercuryWorkshop/celeste-wasm/blob/f135cce98ab667f31a877a6b294b0e5f154824ed/how.md
+The WASM port uses MonoMod modifications operating at the managed IL level and a modified Mono runtime; not a desktop native detour engine. Compare exact runtime version/architecture and public supported APIs before adapting any technique. A direct transplant is not established and runtime internals may require rebuilding/pinning Mono. Investigate alongside the native Apple static hook approach, with ordinary typed dispatch as a fallback; avoid executable native memory modifications and platform impersonation. User's actual tvOS interpreter already demonstrated dynamic method execution and separate-context managed loading; this does not establish arbitrary live IL mutation.
+
+## Source inventory (local v10)
+User's read-only anchor report confirms GameLoader Dialog.Load at line 81 and AreaData.Load at line 88; AreaData.Load builds vanilla list starting line 96 and constructs MapData near 767/776. MapData.Reload validates BinaryPacker package against ModeData.Path at 114–115. SaveData.AfterInitialize expands/truncates Areas based on area count (251–257), so blindly adding areas changes vanilla save schema. Session.MapData indexes AreaData list, and LevelLoader.StartSession accesses SaveData.Instance. Need exact local source excerpts for area initialization, map identity and level/menu entry before creating locked patches. Do not replace original vanilla maps or persist custom progress under their IDs.
