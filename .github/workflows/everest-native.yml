@@ -1,0 +1,153 @@
+name: Everest FNA native candidate
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/everest-native.yml'
+      - 'everest-offline/metal-compat.c'
+permissions:
+  contents: read
+concurrency:
+  group: everest-fna-native
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record toolchain
+        id: sdk
+        run: |
+          xcodebuild -version
+          echo "version=$(xcrun --sdk appletvos --show-sdk-build-version)" >> "$GITHUB_OUTPUT"
+      - name: Reuse public native framework if available
+        id: native-cache
+        uses: actions/cache@v4
+        with:
+          path: native-out
+          key: everest-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.version }}
+      - name: Restore compiled public static archives
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        id: archive-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: native-build/*.a
+          key: everest-static-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.version }}
+      - name: Build pinned public native sources
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config --global url.https://github.com/.insteadOf git://github.com/
+          mkdir -p native-src native-out/licenses native-build
+          src="$PWD/native-src"
+          out="$PWD/native-out"
+          builds="$PWD/native-build"
+          clone_at() {
+            git clone "https://github.com/$1.git" "$src/$2"
+            git -C "$src/$2" checkout --detach "$3"
+            git -C "$src/$2" submodule update --init --recursive
+            git -C "$src/$2" rev-parse HEAD
+          }
+          clone_at libsdl-org/SDL SDL2 257cacab183b312bbe60bd7967eee44a3ad7be85
+          clone_at FNA-XNA/FNA3D FNA3D dba98a71514cc30f3c19dc19fc0a479be7c90d52
+          clone_at FNA-XNA/FAudio FAudio b2bf5b385bb0719f6afc12fd3636be14280f4fbb
+          clone_at FNA-XNA/Theorafile Theorafile 48d74afcbf838fe95ca56cec142efae07bb56f65
+          build() {
+            local project="$1" target="$2"; shift 2
+            if [[ "${{ steps.archive-cache.outputs.cache-hit }}" == true ]]; then
+              echo "Reusing compiled archive for $target"
+              return
+            fi
+            xcodebuild -project "$project" -target "$target" -configuration Release -sdk appletvos ARCHS=arm64 ONLY_ACTIVE_ARCH=NO TVOS_DEPLOYMENT_TARGET=15.0 CODE_SIGNING_ALLOWED=NO CONFIGURATION_BUILD_DIR="$builds" "$@"
+          }
+          build "$src/SDL2/Xcode/SDL/SDL.xcodeproj" "Static Library-tvOS"
+          build "$src/FNA3D/Xcode-iOS/FNA3D.xcodeproj" FNA3D "HEADER_SEARCH_PATHS=$src/SDL2/include $src/FNA3D/MojoShader $src/FNA3D/include"
+          # FAudio's packed distance curve contains a pointer relocation.
+          # Align every static distance curve in these files, preserving the packed ABI.
+          python3 - "$src/FAudio/src" <<'PY'
+          import pathlib, re, sys
+          root = pathlib.Path(sys.argv[1])
+          for name, expected in (("FACT3D.c", 1), ("F3DAudio.c", 2)):
+              p = root / name
+              s, count = re.subn(
+                  r"(static F3DAUDIO_DISTANCE_CURVE (?:DefaultCurve|DefaultVolumeCurve|name##Default)) =",
+                  r"\1 __attribute__((aligned(8))) =",
+                  p.read_text(),
+              )
+              assert count == expected, f"Pinned {name} changed: {count}"
+              p.write_text(s)
+          PY
+          git -C "$src/FAudio" diff -- src/FACT3D.c src/F3DAudio.c
+          build "$src/FAudio/Xcode-iOS/FAudio.xcodeproj" FAudio
+          build "$src/Theorafile/Xcode-iOS/theorafile.xcodeproj" theorafile
+          for name in SDL2 FNA3D FAudio theorafile; do
+            test -s "$builds/lib$name.a"
+            xcrun lipo "$builds/lib$name.a" -verify_arch arm64
+          done
+      # Save independently of the later link so linker retries reuse compiled libraries.
+      # Bump fna-static-v1 when source pins, patches or compilation flags change.
+      - name: Save compiled public static archives
+        if: steps.native-cache.outputs.cache-hit != 'true' && steps.archive-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: native-build/*.a
+          key: ${{ steps.archive-cache.outputs.cache-primary-key }}
+      - name: Link native framework and collect licenses
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$PWD/native-src"
+          out="$PWD/native-out"
+          builds="$PWD/native-build"
+          # The pinned FNA3D Xcode project enables its Metal renderer. No
+          # MoltenVK, unlicensed third-party stubs, FMOD, or private inputs.
+          # The host owns the application entry point; retain SDL_UIKitRunApp.
+          xcrun ar -d "$builds/libSDL2.a" SDL_uikit_main.o
+          if xcrun ar -t "$builds/libSDL2.a" | grep -Fx SDL_uikit_main.o; then
+            exit 1
+          fi
+          sdk=$(xcrun --sdk appletvos --show-sdk-path)
+          frameworks=()
+          for name in Foundation UIKit AudioToolbox AVFoundation CoreGraphics Metal QuartzCore GameController CoreHaptics CoreBluetooth IOSurface CoreFoundation CoreMedia CoreAudio OpenGLES Security SystemConfiguration CFNetwork; do
+            if [[ -d "$sdk/System/Library/Frameworks/$name.framework" ]]; then
+              frameworks+=(-framework "$name")
+            fi
+          done
+          xcrun --sdk appletvos clang -arch arm64 -mtvos-version-min=15.0 -isysroot "$sdk" -I"$src/FNA3D/include" -c everest-offline/metal-compat.c -o "$builds/metal-compat.o"
+          xcrun --sdk appletvos clang++ -arch arm64 -mtvos-version-min=15.0 -isysroot "$sdk" -dynamiclib -Wl,-install_name,@rpath/CelesteNative.framework/CelesteNative -Wl,-force_load,"$builds/libSDL2.a" -Wl,-force_load,"$builds/libFNA3D.a" -Wl,-force_load,"$builds/libFAudio.a" -Wl,-force_load,"$builds/libtheorafile.a" "$builds/metal-compat.o" "${frameworks[@]}" -lz -liconv -o "$out/CelesteNative.dylib"
+          cp "$src/SDL2/LICENSE.txt" "$out/licenses/SDL2-LICENSE.txt"
+          cp "$src/FNA3D/LICENSE" "$out/licenses/FNA3D-LICENSE.txt"
+          cp "$src/FAudio/LICENSE" "$out/licenses/FAudio-LICENSE.txt"
+          git -C "$src/FAudio" diff -- src/FACT3D.c src/F3DAudio.c > "$out/FAudio-tvos-alignment.patch"
+          cp -R "$src/Theorafile/licenses" "$out/licenses/Theorafile"
+          # Preserve MojoShader and other vendored license notices.
+          find "$src/FNA3D/MojoShader" -type f \( -iname 'license*' -o -iname 'copying*' \) -print0 | while IFS= read -r -d '' f; do
+            rel="${f#$src/FNA3D/MojoShader/}"
+            mkdir -p "$out/licenses/MojoShader/$(dirname "$rel")"
+            cp "$f" "$out/licenses/MojoShader/$rel"
+          done
+          for name in SDL2 FNA3D FAudio Theorafile; do
+            echo "$name $(git -C "$src/$name" rev-parse HEAD)" >> "$out/source-revisions.txt"
+            git -C "$src/$name" submodule status --recursive >> "$out/source-revisions.txt"
+          done
+      - name: Verify tvOS platform and representative exported functions
+        run: |
+          set -euo pipefail
+          xcrun lipo native-out/CelesteNative.dylib -verify_arch arm64
+          xcrun vtool -show-build native-out/CelesteNative.dylib | tee build-version.txt
+          grep -i 'platform TVOS' build-version.txt
+          xcrun otool -L native-out/CelesteNative.dylib
+          xcrun nm -gU native-out/CelesteNative.dylib > exported-symbols.txt
+          for name in SDL_UIKitRunApp SDL_Init SDL_GameControllerOpen FNA3D_CreateDevice FAudioCreate FNA3D_SupportsBC7 FNA3D_SupportsSRGBRenderTargets FNA3D_SetTextureName qoa_attributes qoa_close qoa_decode_entire qoa_decode_next_frame qoa_open_from_filename qoa_open_from_memory qoa_seek_frame tf_setaudiotrack tf_setvideotrack; do
+            grep -E " _${name}$" exported-symbols.txt
+          done
+          cp exported-symbols.txt native-out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: everest-native-arm64
+          path: native-out/
+          if-no-files-found: error
+          retention-days: 30
