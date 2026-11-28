@@ -1,0 +1,3 @@
+# Local official patch result: PASS
+
+User console confirmed NETCoreifier, FNA and game MonoMod passes, HookGen and final MMHOOK relink completed successfully. Original inputs unchanged. Celeste 1.0.0.0 SHA256 F083E95631C02B479FCA8E5F0216DA8CF1F293CC280874A0D7F803332B0BB23C; FNA 24.1.0.0 SHA256 4CF5944083C1E51E7F0F32EE7631F5B5681011F45007B295E0A70FB6BBE0FBBB; MMHOOK_Celeste 0.0.0.0 SHA256 94D484AB5A24069DF00BB4B6F63C4BBA9855F4E49631CC3FD0DB1CAEB538D43C. Preparation syntax CI 46180234490 passed. Do not repeat patching. No tvOS runtime claim; next audit FNA import compatibility and actual dependency/entrypoint metadata, then adapt boot and packaging. No proprietary binaries uploaded.
