@@ -1,0 +1,25 @@
+name: Everest offline preparation checks
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'everest-offline/**'
+      - '.github/workflows/everest-offline.yml'
+permissions:
+  contents: read
+jobs:
+  syntax:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate PowerShell syntax without executing game tools
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'everest-offline/Prepare-Everest.ps1'),
+            [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count) { $errors | Format-List; throw 'Syntax check failed' }
+          Write-Host 'PASS: script syntax only'
