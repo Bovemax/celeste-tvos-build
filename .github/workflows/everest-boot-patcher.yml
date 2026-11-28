@@ -5,6 +5,8 @@ on:
     paths:
       - 'everest-offline/boot-patcher/**'
       - 'everest-offline/Prepare-EverestBoot.ps1'
+      - 'everest-offline/package_everest.py'
+      - 'everest-offline/test_package_everest.py'
       - '.github/workflows/everest-boot-patcher.yml'
 permissions:
   contents: read
@@ -20,3 +22,5 @@ jobs:
       - run: dotnet build everest-offline/boot-patcher/BootPatcher.csproj -c Release
       - name: Confirm no game binaries are needed for compilation
         run: test -f everest-offline/boot-patcher/bin/Release/net8.0/BootPatcher.dll
+      - name: Test local payload packaging guards
+        run: python3 -m unittest discover -s everest-offline -p 'test_package_everest.py'
