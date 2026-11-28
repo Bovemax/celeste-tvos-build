@@ -70,6 +70,16 @@ static void Patch(AssemblyDefinition game) {
             Instruction.Create(OpCodes.Ldstr,name=="SavePath"?"Saves":"Backups"),Instruction.Create(OpCodes.Call,combine),
             Instruction.Create(OpCodes.Stsfld,field));
     }
+    // Cecil does not automatically expand short branch encodings after inserting IL.
+    foreach(var m in new[]{main,Method(mod.GetType("Celeste.Celeste"),"CriticalFailureHandler",1),eboot,cctor}) {
+        foreach(var i in m.Body.Instructions) i.OpCode=i.OpCode.Code switch {
+            Code.Br_S=>OpCodes.Br, Code.Brfalse_S=>OpCodes.Brfalse, Code.Brtrue_S=>OpCodes.Brtrue,
+            Code.Beq_S=>OpCodes.Beq, Code.Bge_S=>OpCodes.Bge, Code.Bge_Un_S=>OpCodes.Bge_Un,
+            Code.Bgt_S=>OpCodes.Bgt, Code.Bgt_Un_S=>OpCodes.Bgt_Un, Code.Ble_S=>OpCodes.Ble,
+            Code.Ble_Un_S=>OpCodes.Ble_Un, Code.Blt_S=>OpCodes.Blt, Code.Blt_Un_S=>OpCodes.Blt_Un,
+            Code.Bne_Un_S=>OpCodes.Bne_Un, Code.Leave_S=>OpCodes.Leave, _=>i.OpCode
+        };
+    }
     Console.WriteLine("Applied host-native resolver, no desktop relaunch, return-to-host diagnostics, writable Everest and save roots.");
 }
 if(args.Length!=2) throw new ArgumentException("Usage: BootPatcher <offline-stage> <new-payload-dir>");
@@ -78,7 +88,8 @@ Require(!Directory.Exists(dst)&&!File.Exists(dst),"Choose a new output directory
 Require(!dst.StartsWith(src+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase),"Output must be outside original stage");
 foreach(var pair in new[]{("Celeste.dll",GameHash),("FNA.dll",FnaHash),("MMHOOK_Celeste.dll",HookHash)})
     Require(Hash(Path.Combine(src,pair.Item1))==pair.Item2,"Input hash differs: "+pair.Item1);
-var framework=((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")??"").Split(Path.PathSeparator)
+var runtimeDir=System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory();
+var framework=Directory.EnumerateFiles(runtimeDir,"*.dll")
     .Select(Path.GetFileNameWithoutExtension).ToHashSet(StringComparer.OrdinalIgnoreCase);
 framework.UnionWith(new[]{"mscorlib","System","System.Core","System.Xml","netstandard"});
 // Compute the local non-framework closure before writing anything.
