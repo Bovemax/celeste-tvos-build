@@ -1,0 +1,45 @@
+name: Everest isolated game host
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'everest-host/**'
+      - '.github/workflows/everest-host.yml'
+permissions:
+  contents: read
+concurrency:
+  group: everest-host-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  host:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet workload install tvos
+      - name: Publish isolated interpreter host
+        run: |
+          set -euo pipefail
+          dotnet publish everest-host/EverestHost.csproj -c Release -r tvos-arm64 -p:EnableCodeSigning=false -p:ValidateXcodeVersion=false -p:BuildIpa=false
+          APP=$(find everest-host/bin -name '*.app' -type d -print -quit)
+          test -n "$APP"
+          /usr/libexec/PlistBuddy -c 'Print :CelesteEverestBootVersion' "$APP/Info.plist" | grep -x 1
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist" | grep -Fx 'org.example.celestelocalhost.everesttest'
+          if find "$APP" -iname FNA.dll -o -iname Celeste.dll | grep .; then
+            echo "Unexpected game payload in public host"
+            exit 1
+          fi
+          mkdir -p out/Payload
+          ditto "$APP" out/Payload/EverestHost.app
+          ditto -c -k --keepParent out/Payload out/EverestHost-base.ipa
+          unzip -t out/EverestHost-base.ipa | tail -1
+          xcrun vtool -show-build out/Payload/EverestHost.app/EverestHost | grep -i 'platform TVOS'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: everest-host-base-unsigned
+          path: out/EverestHost-base.ipa
+          if-no-files-found: error
+          retention-days: 30
