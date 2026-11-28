@@ -1,0 +1,22 @@
+name: Everest boot patcher compile
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'everest-offline/boot-patcher/**'
+      - 'everest-offline/Prepare-EverestBoot.ps1'
+      - '.github/workflows/everest-boot-patcher.yml'
+permissions:
+  contents: read
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet build everest-offline/boot-patcher/BootPatcher.csproj -c Release
+      - name: Confirm no game binaries are needed for compilation
+        run: test -f everest-offline/boot-patcher/bin/Release/net8.0/BootPatcher.dll
